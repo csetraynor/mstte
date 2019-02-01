@@ -1,0 +1,32 @@
+Package: mstte
+Title: Multi-state models applied to time-to-event.
+Version: 0.0.0.9000
+Authors@R: 
+    c( person(given = "Carlos",
+           family = "Traynor",
+           role = c("aut", "cre"),
+           email = "c.traynor@warwick.ac.uk"),
+   person(given = "Linda",
+           family = "Wanika",
+           role = c("ctb"),
+           email = "l.wanika@warwick.ac.uk") )
+Description: This package can be used to fit state-space model using hamiltonian monte-carlo simulations.
+License: GPL (>=3)
+Depends: 
+    methods,
+    R (>= 3.4.0),
+    Rcpp (>= 1.0.0)
+Imports: 
+    rstan (>= 2.18.2),
+    rstantools (>= 1.5.1)
+LinkingTo: 
+    BH (>= 1.69.0-1),
+    Rcpp (>= 1.0.0),
+    RcppEigen (>= 0.3.3.5.0),
+    rstan (>= 2.18.2),
+    StanHeaders (>= 2.18.1)
+Encoding: UTF-8
+LazyData: true
+NeedsCompilation: yes
+SystemRequirements: GNU make
+RoxygenNote: 6.1.1
