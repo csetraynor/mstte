@@ -48,6 +48,24 @@ check_trans <- function(f, t){
   }
 }
 
+
+# ------------- Helpers ---------------#
+#Compute point estimates and standard errors from pointwise vectors
+#
+# @param x A matrix.
+# @return An ncol(x) by 2 matrix with columns 'Estimate' and 'SE'
+#   and rownames equal to colnames(x).
+#
+table_of_estimates <- function(x) {
+  out <- cbind(
+    Estimate = colSums2(x),
+    SE = sqrt(nrow(x) * colVars(x))
+  )
+  rownames(out) <- colnames(x)
+  return(out)
+}
+
+
 # Check formula object
 #
 # @param formula The user input to the formula argument.
@@ -241,7 +259,8 @@ match_starting <- function(t, m){
 # @param a transition matrix
 # @param a transition
 match_to <- function(t, m){
-  which(apply(m, 2, function(x) return(t %in% x )))
+  which(apply(m, 2, function(x) return(t %in% x )) )
+
 }
 
 # Find competing state
@@ -285,12 +304,41 @@ rhs <- function(x, as_formula = FALSE) {
 # @param data The user specified data frame.
 make_model_data2 <- function(data, formula, cens_formula ) {
 
+  time_var <- data[ ,formula$tvar_end]
+  status_var <- data[ ,formula$dvar]
+
+  if(length(cens_formula)){
+    censor_time <- lapply(cens_formula, function(c)
+      data[ ,c$tvar_end] )
+    for(i in seq_along(censor_time)){
+
+    }
+
+  }
+
   data <- data[data[aux_formula$dvar] == aux_cens, ]
   data <- data[data[formula$tvar_end] > 0, ] # remove 0 time
   data <- data[data[formula$dvar] == cens, ]
   mf <- model.frame(formula$tf_form, data, na.action = na.pass)
   include <- apply(mf, 1L, function(row) !any(is.na(row)))
-
-
   data[include, , drop = FALSE]
 }
+
+
+
+
+# # Return a data frame with NAs excluded
+# #
+# # @param formula The parsed model formula.
+# # @param data The user specified data frame.
+# make_model_data <- function(formula, aux_formula, data, cens, aux_cens ) {
+#
+#   data <- data[data[aux_formula$dvar] == aux_cens, ]
+#   data <- data[data[formula$tvar_end] > 0, ] # remove 0 time
+#   data <- data[data[formula$dvar] == cens, ]
+#   mf <- model.frame(formula$tf_form, data, na.action = na.pass)
+#   include <- apply(mf, 1L, function(row) !any(is.na(row)))
+#
+#
+#   data[include, , drop = FALSE]
+# }

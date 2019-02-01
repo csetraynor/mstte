@@ -21,7 +21,10 @@ State 3 is absorbing, reachable from states 1 and 2.
 }
 \examples{
 \donttest{
-   # trans_mat( x = list( c(2, 3), c(1, 3), c() ) )
+   # For a competing risks setting
+   trans_mat( x = list( c(2, 3), c(3), c() ) )
+   # For consecutive states
+   trans_mat( x = list(c(2), 3, c() ) )
    }
 }
 \references{

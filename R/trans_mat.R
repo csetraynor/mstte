@@ -3,6 +3,7 @@
 #'
 #' In a competing risk setting state 2 is reachable from state 1.
 #' State 3 is absorbing, reachable from states 1 and 2.
+#' @export
 #' @param  x:  List of possible transitions.
 #'     x[[i]] consists of a vector of state numbers
 #'     reachable from state i.

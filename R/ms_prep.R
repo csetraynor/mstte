@@ -59,17 +59,17 @@ ms_prep <- function(formula,
     data <- lapply(seq_len(ns), function(s){
       nr <- match_starting(s, tm)
       nt <- match_to(s, tm)
-      ni <- match_censors(tm, nr, nt)
+      ni <- match_competing(tm, nr, nt)
+
+      formula_c =  formula[ni]
 
       if(recovery){
-
-      } else {
-        formula_cens =  formula[ni]
+        formula_c = formula_c[-nr]
       }
 
       data <- make_model_data2(data,
                                formula = formula[[s]],
-                               formula_cens = )
+                               formula_cens = formula_c)
 
 
 
@@ -86,18 +86,4 @@ ms_prep <- function(formula,
 
 
 
-  # Return a data frame with NAs excluded
-  #
-  # @param formula The parsed model formula.
-  # @param data The user specified data frame.
-  make_model_data <- function(formula, aux_formula, data, cens, aux_cens ) {
 
-    data <- data[data[aux_formula$dvar] == aux_cens, ]
-    data <- data[data[formula$tvar_end] > 0, ] # remove 0 time
-    data <- data[data[formula$dvar] == cens, ]
-    mf <- model.frame(formula$tf_form, data, na.action = na.pass)
-    include <- apply(mf, 1L, function(row) !any(is.na(row)))
-
-
-    data[include, , drop = FALSE]
-  }
