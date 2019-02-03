@@ -1,4 +1,10 @@
-ms_prep <- function(formula,
+
+
+
+
+
+
+ms_stan <- function(formula,
                     data,
                     tm,
                     recovery,
@@ -49,32 +55,19 @@ ms_prep <- function(formula,
 
   if(!is.null(formula)){
 
+
     # check_trans
     check_trans(tm, formula)
+    ns <- max(tm, na.rm = TRUE)
 
     # parse formula
     formula <- lapply(formula, function(f) parse_formula(f, data))
 
-
+    # prepare data
     data <- lapply(seq_len(ns), function(s){
-      nr <- match_starting(s, tm)
-      nt <- match_to(s, tm)
-      ni <- match_competing(tm, nr, nt)
-
-      formula_c =  formula[ni]
-
-      if(recovery){
-        formula_c = formula_c[-nr]
-      }
-
-      data <- make_model_data2(data,
-                               formula = formula[[s]],
-                               formula_cens = formula_c)
-
-
-
-
+      make_model_data2(data, formula = formula[[s]], s)
     })
+
 
 
 
@@ -83,7 +76,3 @@ ms_prep <- function(formula,
   }
 
 }
-
-
-
-
