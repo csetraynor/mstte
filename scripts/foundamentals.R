@@ -86,7 +86,7 @@ tmat.mst[2,3] <- 3
 dimnames(tmat.mst) <- list(c("transplant","relapse","death"),
                            c("transplant","relapse","death"))
 
-ebmt.mstate <- msprep(time=c(NA,"rel","srv"), status=c(NA,"relstat","srvstat"), data=ebmt1, trans=tmat.mst )
+ebmt.mstate <- msprep(time=c(NA,"rel","srv"), status=c(NA,"relstat","srvstat"), data=ebmt1, trans=tmat.mst , keep = c("age", "score"))
 ebmt1[1:2, ]
 head(ebmt1)
 ebmt.mstate[1:10, ]
@@ -117,7 +117,7 @@ scl.ms <- msprep(time=c(NA,"PD_TIME","OS_TIME"), status=c(NA,"PD_STATUS","OS_STA
 scl.ms$time[scl.ms$time == 0] <- 1e-10 # add small lag time
 
 formula = lapply(1:3, function (x)
-  as.formula(Surv(time=time,event=status)~TRTARM) )
+  as.formula(Surv(time=time,event=status)~age+score) )
 
 prior = lapply(1:3, function(x)
   rstanarm::normal() )

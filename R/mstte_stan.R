@@ -255,7 +255,7 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
     stop2("A formula object has to be provided.")
   }
 
-  ns <- length(formula)
+  nt <- length(formula) # number of transitions in the model
 
   if (missing(basehaz_ops))
     basehaz_ops <- NULL
@@ -394,56 +394,61 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
   x_delay <- lapply(seq_along(status),  function(i)keep_rows(x_centered[[i]], delayed[[i]]) )
   K <- lapply(x, function(i) ncol(i) )
 
+  ## prepare data
+  nevent = aau(nevent)
+  nrcens = aau(nrcens)
+  nlcens = aau(nlcens)
+  nicens = aau(nicens)
+  ndelay = aau(ndelay)
+
+  posevent = cumsum(nevent)
+  posrcens = cumsum(nrcens)
+  poslcens = cumsum(nlcens)
+  posnices = cumsum(nicens)
+  posdelay = cumsum(ndelay)
+
+  posbasis_event = aau(lapply(basis_event, function(b) nrow(b)))
+  posibasis_event = aau(lapply(ibasis_event, function(b) nrow(b)))
+  posibasis_rcens = aau(lapply(ibasis_rcens, function(b) nrow(b)))
+
   standata <- nlist(
+    nt    = nt,
+    s_K     = aau(K),
+    nK    = sum(aau(K)),
+    s_vars = aau(nvars),
+    Nvars = sum(aau(nvars)),
 
-    K01 = K[[1]], K02 = K[[2]], K12 = K[[3]],
-    nvars01 = nvars[[1]] , nvars02 = nvars[[2]], nvars12 = nvars[[3]],
+    x_bar = aau(x_bar),
 
-    x_bar01 = x_bar[[1]],x_bar02 = x_bar[[2]],x_bar12 = x_bar[[3]],
+    has_intercept = aau(has_intercept),
+    N_has_intercept = sum(aau(has_intercept)),
 
-    has_intercept01 = has_intercept[[1]], has_intercept02 = has_intercept[[2]], has_intercept12 = has_intercept[[3]],
+    type = aau(lapply(basehaz, function(b) b$type) ),
 
-    type01 = basehaz[[1]]$type,
-    type02 = basehaz[[2]]$type,
-    type12 = basehaz[[3]]$type,
+    log_crude_event_rate = aau(log_crude_event_rate),
 
-    log_crude_event_rate01 = log_crude_event_rate[[1]],log_crude_event_rate02 = log_crude_event_rate[[2]],log_crude_event_rate12 = log_crude_event_rate[[3]],
+    Nevent = sum(nevent),
+    Nrcens = sum(nrcens),
 
-    nevent01 = nevent[[1]],
-    nevent02 = nevent[[2]],
-    nevent12 = nevent[[3]],
+    s_event = nevent,
+    s_rcens = nrcens,
 
-    nrcens01 = nrcens[[1]],
-    nrcens02 = nrcens[[2]],
-    nrcens12 = nrcens[[3]],
+    t_event = aau(t_event),
+    t_rcens = aau(t_rcens),
 
-    t_event01 = aa(t_event[[1]]),
-    t_event02 = aa(t_event[[2]]),
-    t_event12 = aa(t_event[[3]]),
+    x_event = aau(x_event),
+    x_rcens = aau(x_rcens),
 
-    t_rcens01 = t_rcens[[1]],
-    t_rcens02 = t_rcens[[2]],
-    t_rcens12 = t_rcens[[3]],
+    Nxevent = length(aau(x_event)),
+    Nxrcens = length(aau(x_rcens)),
 
-    x_event01 = x_event[[1]],
-    x_event02 = x_event[[2]],
-    x_event12 = x_event[[3]],
+    basis_event  = aau(basis_event),
+    ibasis_event = aau(ibasis_event),
+    ibasis_rcens = aau(ibasis_rcens),
 
-    x_rcens01 = x_rcens[[1]],
-    x_rcens02 = x_rcens[[2]],
-    x_rcens12 = x_rcens[[3]],
-
-    basis_event01 = basis_event[[1]],
-    basis_event02 = basis_event[[2]],
-    basis_event12 = basis_event[[3]],
-
-    ibasis_event01 = ibasis_event[[1]],
-    ibasis_event02 = ibasis_event[[2]],
-    ibasis_event12 = ibasis_event[[3]],
-
-    ibasis_rcens01 = ibasis_rcens[[1]],
-    ibasis_rcens02 = ibasis_rcens[[2]],
-    ibasis_rcens12 = ibasis_rcens[[3]]
+    Nbasis_event  = length(aau(basis_event)),
+    Nibasis_event = length(aau(ibasis_event)),
+    Nibasis_rcens = length(aau(ibasis_rcens))
   )
 
   #----- priors and hyperparameters
@@ -461,170 +466,73 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
   ok_smooth_dists    <- c(ok_dists[1:3], "exponential")
 
   # priors
-  user_prior_stuff01 <- prior_stuff01 <-
-    handle_glm_prior(prior01,
-                     nvars = standata$K01,
-                     default_scale = 2.5,
-                     link = NULL,
-                     ok_dists = ok_dists)
+  user_prior_stuff <- prior_stuff <- lapply(seq_len(nt), function(k)
+    handle_glm_prior(prior[[k]],
+                   nvars = standata$K[k],
+                   default_scale = 2.5,
+                   link = NULL,
+                   ok_dists = ok_dists)
+  )
+  user_prior_intercept_stuff <- prior_intercept_stuff <-
+    lapply(seq_len(nt), function(k) handle_glm_prior(
+      prior_intercept[[k]],
+      nvars = 1,
+      default_scale = 20,
+      link = NULL,
+      ok_dists = ok_intercept_dists)
+    )
+  user_prior_aux_stuff <- prior_aux_stuff <-
+    lapply(seq_len(nt), function(k) handle_glm_prior(
+      prior_aux[[k]],
+      nvars = standata$s_vars[k],
+      default_scale = get_default_aux_scale(basehaz[[k]]),
+      link = NULL,
+      ok_dists = ok_aux_dists)
+    )
 
-  user_prior_intercept_stuff01 <- prior_intercept_stuff01 <-
-    handle_glm_prior(prior_intercept01,
-                     nvars = 1,
-                     default_scale = 20,
-                     link = NULL,
-                     ok_dists = ok_intercept_dists)
-
-  user_prior_aux_stuff01 <- prior_aux_stuff01 <-
-    handle_glm_prior(prior_aux01,
-                     nvars = standata$nvars01,
-                     default_scale = get_default_aux_scale(basehaz01),
-                     link = NULL,
-                     ok_dists = ok_aux_dists)
-
-  # stop null priors if prior_PD is TRUE
-  if (prior_PD) {
-    if (is.null(prior01))
-      stop("'prior' cannot be NULL if 'prior_PD' is TRUE")
-    if (is.null(prior_intercept01) && has_intercept01)
-      stop("'prior_intercept' cannot be NULL if 'prior_PD' is TRUE")
-    if (is.null(prior_aux01))
-      stop("'prior_aux' cannot be NULL if 'prior_PD' is TRUE")
-  }
-
-  # priors
-  user_prior_stuff02 <- prior_stuff02 <-
-    handle_glm_prior(prior02,
-                     nvars = standata$K02,
-                     default_scale = 2.5,
-                     link = NULL,
-                     ok_dists = ok_dists)
-
-  user_prior_intercept_stuff02 <- prior_intercept_stuff02 <-
-    handle_glm_prior(prior_intercept02,
-                     nvars = 1,
-                     default_scale = 20,
-                     link = NULL,
-                     ok_dists = ok_intercept_dists)
-
-  user_prior_aux_stuff02 <- prior_aux_stuff02 <-
-    handle_glm_prior(prior_aux02,
-                     nvars = standata$nvars02,
-                     default_scale = get_default_aux_scale(basehaz02),
-                     link = NULL,
-                     ok_dists = ok_aux_dists)
 
   # stop null priors if prior_PD is TRUE
   if (prior_PD) {
-    if (is.null(prior02))
+    if (is.null(prior))
       stop("'prior' cannot be NULL if 'prior_PD' is TRUE")
-    if (is.null(prior_intercept02) && has_intercept02)
+    if (is.null(prior_intercept && has_intercept) )
       stop("'prior_intercept' cannot be NULL if 'prior_PD' is TRUE")
-    if (is.null(prior_aux02))
-      stop("'prior_aux' cannot be NULL if 'prior_PD' is TRUE")
-  }
-
-  # priors
-  user_prior_stuff12 <- prior_stuff12 <-
-    handle_glm_prior(prior12,
-                     nvars = standata$K12,
-                     default_scale = 2.5,
-                     link = NULL,
-                     ok_dists = ok_dists)
-
-  user_prior_intercept_stuff12 <- prior_intercept_stuff12 <-
-    handle_glm_prior(prior_intercept12,
-                     nvars = 1,
-                     default_scale = 20,
-                     link = NULL,
-                     ok_dists = ok_intercept_dists)
-
-  user_prior_aux_stuff12 <- prior_aux_stuff12 <-
-    handle_glm_prior(prior_aux12,
-                     nvars = standata$nvars12,
-                     default_scale = get_default_aux_scale(basehaz12),
-                     link = NULL,
-                     ok_dists = ok_aux_dists)
-
-  # stop null priors if prior_PD is TRUE
-  if (prior_PD) {
-    if (is.null(prior12))
-      stop("'prior' cannot be NULL if 'prior_PD' is TRUE")
-    if (is.null(prior_intercept12) && has_intercept12)
-      stop("'prior_intercept' cannot be NULL if 'prior_PD' is TRUE")
-    if (is.null(prior_aux12))
+    if (is.null(prior_aux))
       stop("'prior_aux' cannot be NULL if 'prior_PD' is TRUE")
   }
 
   # autoscaling of priors
-  prior_stuff01           <- autoscale_prior(prior_stuff01, predictors = x[[1]])
-  prior_intercept_stuff01 <- autoscale_prior(prior_intercept_stuff01)
-  prior_aux_stuff01       <- autoscale_prior(prior_aux_stuff01)
-
-  prior_stuff02           <- autoscale_prior(prior_stuff02, predictors =  x[[2]])
-  prior_intercept_stuff02 <- autoscale_prior(prior_intercept_stuff02)
-  prior_aux_stuff02       <- autoscale_prior(prior_aux_stuff02)
-
-  prior_stuff12           <- autoscale_prior(prior_stuff12, predictors =  x[[3]])
-  prior_intercept_stuff12 <- autoscale_prior(prior_intercept_stuff12)
-  prior_aux_stuff12       <- autoscale_prior(prior_aux_stuff12)
+  prior_stuff           <- lapply(seq_len(nt), function(k)
+    autoscale_prior(prior_stuff[[k]], predictors = x[[k]]) )
+  prior_intercept_stuff <- lapply(seq_len(nt), function(k)
+    autoscale_prior(prior_intercept_stuff[[k]]))
+  prior_aux_stuff       <- lapply(seq_len(nt), function(k)
+    autoscale_prior(prior_aux_stuff[[k]]) )
 
   # priors
-  standata$prior_dist01              <- prior_stuff01$prior_dist
-  standata$prior_dist_for_intercept01 <- prior_intercept_stuff01$prior_dist
-  standata$prior_dist_for_aux01      <- prior_aux_stuff01$prior_dist
-
-  standata$prior_dist02              <- prior_stuff02$prior_dist
-  standata$prior_dist_for_intercept02 <- prior_intercept_stuff02$prior_dist
-  standata$prior_dist_for_aux02      <- prior_aux_stuff02$prior_dist
-
-  standata$prior_dist12              <- prior_stuff12$prior_dist
-  standata$prior_dist_for_intercept12 <- prior_intercept_stuff12$prior_dist
-  standata$prior_dist_for_aux12      <- prior_aux_stuff12$prior_dist
+  standata$prior_dist              <- aa( sapply(prior_stuff, function(p) p$prior_dist) )
+  standata$prior_dist_for_intercept <- aa( sapply(prior_intercept_stuff, function(i) i$prior_dist) )
+  standata$prior_dist_for_aux      <-  aa( sapply(prior_aux_stuff, function(a) a$prior_dist ) )
 
 
   # hyperparameters
-  standata$prior_mean01               <- prior_stuff01$prior_mean
-  standata$prior_scale01              <- prior_stuff01$prior_scale
-  standata$prior_df01                 <- prior_stuff01$prior_df
-  standata$prior_mean_for_intercept01 <- c(prior_intercept_stuff01$prior_mean)
-  standata$prior_scale_for_intercept01 <- c(prior_intercept_stuff01$prior_scale)
-  standata$prior_df_for_intercept01   <- c(prior_intercept_stuff01$prior_df)
-  standata$prior_scale_for_aux01      <- prior_aux_stuff01$prior_scale
-  standata$prior_df_for_aux01         <- prior_aux_stuff01$prior_df
-  standata$global_prior_scale01       <- prior_stuff01$global_prior_scale
-  standata$global_prior_df01          <- prior_stuff01$global_prior_df
-  standata$slab_df01                  <- prior_stuff01$slab_df
-  standata$slab_scale01               <- prior_stuff01$slab_scale
+  standata$prior_mean    <- aau( lapply(prior_stuff, function(p) p$prior_mean ) )
+  standata$prior_scale   <- aau( lapply(prior_stuff, function(p) p$prior_scale ) )
+  standata$prior_df      <- aau( lapply(prior_stuff, function(p) p$prior_df ) )
+  standata$prior_mean_for_intercept <- aau( lapply(prior_intercept_stuff, function(i) i$prior_mean) )
+  standata$prior_scale_for_intercept <- aau( lapply(prior_intercept_stuff, function(i) i$prior_scale) )
+  standata$prior_df_for_intercept   <- aau( lapply(prior_intercept_stuff, function(i) i$prior_df) )
+  standata$prior_scale_for_aux <- aau( lapply( prior_aux_stuff, function(p) p$prior_scale))
+  standata$prior_df_for_aux <- aau( lapply( prior_aux_stuff, function(p) p$prior_df))
+  standata$global_prior_scale <- aau( lapply( prior_stuff, function(p) p$global_prior_scale))
+  standata$global_prior_df <- aau( lapply( prior_stuff, function(p) p$global_prior_df))
+  standata$slab_df <- aau( lapply( prior_stuff, function(p) p$slab_df))
+  standata$slab_scale <- aau( lapply( prior_stuff, function(p) p$slab_scale))
+
   # standata$prior_mean_for_smooth01    <- prior_smooth_stuff01$prior_mean
   # standata$prior_scale_for_smooth01   <- prior_smooth_stuff01$prior_scale
   # standata$prior_df_for_smooth01      <- prior_smooth_stuff01$prior_df
 
-  standata$prior_mean02               <- prior_stuff02$prior_mean
-  standata$prior_scale02              <- prior_stuff02$prior_scale
-  standata$prior_df02                 <- prior_stuff02$prior_df
-  standata$prior_mean_for_intercept02 <- c(prior_intercept_stuff02$prior_mean)
-  standata$prior_scale_for_intercept02 <- c(prior_intercept_stuff02$prior_scale)
-  standata$prior_df_for_intercept02   <- c(prior_intercept_stuff02$prior_df)
-  standata$prior_scale_for_aux02      <- prior_aux_stuff02$prior_scale
-  standata$prior_df_for_aux02         <- prior_aux_stuff02$prior_df
-  standata$global_prior_scale02       <- prior_stuff02$global_prior_scale
-  standata$global_prior_df02          <- prior_stuff02$global_prior_df
-  standata$slab_df02                  <- prior_stuff02$slab_df
-  standata$slab_scale02               <- prior_stuff02$slab_scale
-
-  standata$prior_mean12               <- prior_stuff12$prior_mean
-  standata$prior_scale12              <- prior_stuff12$prior_scale
-  standata$prior_df12                 <- prior_stuff12$prior_df
-  standata$prior_mean_for_intercept12 <- c(prior_intercept_stuff12$prior_mean)
-  standata$prior_scale_for_intercept12 <- c(prior_intercept_stuff12$prior_scale)
-  standata$prior_df_for_intercept12   <- c(prior_intercept_stuff12$prior_df)
-  standata$prior_scale_for_aux12      <- prior_aux_stuff12$prior_scale
-  standata$prior_df_for_aux12         <- prior_aux_stuff12$prior_df
-  standata$global_prior_scale12       <- prior_stuff12$global_prior_scale
-  standata$global_prior_df12          <- prior_stuff12$global_prior_df
-  standata$slab_df12                  <- prior_stuff12$slab_df
-  standata$slab_scale12               <- prior_stuff12$slab_scale
   # any additional flags
   standata$prior_PD <- ai(prior_PD)
 
@@ -632,63 +540,34 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
   # Prior summary
   #---------------
 
-  prior_info01 <- summarize_jm_prior(
-    user_priorEvent           = user_prior_stuff01,
-    user_priorEvent_intercept = user_prior_intercept_stuff01,
-    user_priorEvent_aux       = user_prior_aux_stuff01,
-    adjusted_priorEvent_scale           = prior_stuff01$prior_scale,
-    adjusted_priorEvent_intercept_scale = prior_intercept_stuff01$prior_scale,
-    adjusted_priorEvent_aux_scale       = prior_aux_stuff01$prior_scale,
-    e_has_intercept  = standata$has_intercept01,
-    e_has_predictors = standata$K01 > 0,
-    basehaz = basehaz[[1]]
-  )
-
-  prior_info02 <- summarize_jm_prior(
-    user_priorEvent           = user_prior_stuff02,
-    user_priorEvent_intercept = user_prior_intercept_stuff02,
-    user_priorEvent_aux       = user_prior_aux_stuff02,
-    adjusted_priorEvent_scale           = prior_stuff02$prior_scale,
-    adjusted_priorEvent_intercept_scale = prior_intercept_stuff02$prior_scale,
-    adjusted_priorEvent_aux_scale       = prior_aux_stuff02$prior_scale,
-    e_has_intercept  = standata$has_intercept02,
-    e_has_predictors = standata$K02 > 0,
-    basehaz = basehaz[[2]]
-  )
-
-  prior_info12 <- summarize_jm_prior(
-    user_priorEvent           = user_prior_stuff12,
-    user_priorEvent_intercept = user_prior_intercept_stuff12,
-    user_priorEvent_aux       = user_prior_aux_stuff12,
-    adjusted_priorEvent_scale           = prior_stuff12$prior_scale,
-    adjusted_priorEvent_intercept_scale = prior_intercept_stuff12$prior_scale,
-    adjusted_priorEvent_aux_scale       = prior_aux_stuff12$prior_scale,
-    e_has_intercept  = standata$has_intercept12,
-    e_has_predictors = standata$K12 > 0,
-    basehaz = basehaz[[3]]
-  )
-
-  prior_info <- list(prior_info01, prior_info02, prior_info12)
+  prior_info <- lapply(seq_len(nt), function(k)
+    summarize_jm_prior(
+      user_priorEvent           = user_prior_stuff[[k]],
+      user_priorEvent_intercept = user_prior_intercept_stuff[[k]],
+      user_priorEvent_aux       = user_prior_aux_stuff[[k]],
+      adjusted_priorEvent_scale           = prior_stuff[[k]]$prior_scale,
+      adjusted_priorEvent_intercept_scale = prior_intercept_stuff[[k]]$prior_scale,
+      adjusted_priorEvent_aux_scale       = prior_aux_stuff[[k]]$prior_scale,
+      e_has_intercept  = standata$has_intercept[[k]],
+      e_has_predictors = standata$K[[k]] > 0,
+      basehaz = basehaz[[k]]
+    )
+    )
 
   #-----------
   # Fit model
   #-----------
 
   # obtain stan model code
-  stanfit  <- stanmodels$MS
+  stanfit  <- stanmodels$mstte
 
   # specify parameters for stan to monitor
-  stanpars <- c(if (standata$has_intercept01) "alpha01",
-                if (standata$K01)             "beta01",
-                if (standata$nvars01)         "aux01",
-                if (standata$has_intercept02) "alpha02",
-                if (standata$K02)             "beta02",
-                if (standata$nvars02)         "aux02",
-                if (standata$has_intercept12) "alpha12",
-                if (standata$K12)             "beta12",
-                if (standata$nvars12)         "aux12")
+  stanpars <- c(if ( any(standata$has_intercept) ) "alpha",
+                if ( any(standata$K) )            "beta",
+                if ( any(standata$nvars)  )       "aux")
 
-  #
+  return(standata)
+
   #
   # # fit model using stan
   if (algorithm == "sampling") { # mcmc

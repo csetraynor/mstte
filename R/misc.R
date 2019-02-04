@@ -1,4 +1,44 @@
 #------------ General
+# Check whether a vector/matrix/array contains an "(Intercept)"
+check_for_intercept <- function(x, logical = FALSE) {
+  nms <- if (is.matrix(x)) colnames(x) else names(x)
+  sel <- which("(Intercept)" %in% nms)
+  if (logical) as.logical(length(sel)) else sel
+}
+
+# Drop intercept from a vector/matrix/array of named coefficients
+drop_intercept <- function(x) {
+  sel <- check_for_intercept(x)
+  if (length(sel) && is.matrix(x)) {
+    x[, -sel, drop = FALSE]
+  } else if (length(sel)) {
+    x[-sel]
+  } else {
+    x
+  }
+}
+
+# shorthand for as array and unlist
+aau <- function(x){
+  aa(ulist(x))
+}
+
+# shorthand for do.call rbind
+rb <- function(x){
+  do.call(rbind, x)
+}
+
+# Select rows of a matrix
+#
+# @param x A matrix.
+# @param rows Logical or numeric vector stating which rows of 'x' to retain.
+keep_rows <- function(x, rows = 1:nrow(x)) {
+  x[rows, , drop = FALSE]
+}
+
+# Concatenate (i.e. 'c(...)') but don't demote factors to integers
+ulist <- function(...) { unlist(list(...)) }
+
 # Create a named list using specified names or, if names are omitted, using the
 # names of the objects in the list
 #
@@ -49,6 +89,23 @@ aa <- function(x, ...) as.array  (x, ...)
 # Safe deparse
 safe_deparse <- function(expr) deparse(expr, 500L)
 
+# Maybe broadcast
+#
+# @param x A vector or scalar.
+# @param n Number of replications to possibly make.
+# @return If \code{x} has no length the \code{0} replicated \code{n} times is
+#   returned. If \code{x} has length 1, the \code{x} replicated \code{n} times
+#   is returned. Otherwise \code{x} itself is returned.
+maybe_broadcast <- function(x, n) {
+  if (!length(x)) {
+    rep(0, times = n)
+  } else if (length(x) == 1L) {
+    rep(x, times = n)
+  } else {
+    x
+  }
+}
+
 # Return the cutpoints for a specified number of quantiles of 'x'
 #
 # @param x A numeric vector.
@@ -93,6 +150,18 @@ validate_positive_scalar <- function(x, not_greater_than = NULL) {
     if (!all(x <= not_greater_than))
       stop(nm, " should less than or equal to ", not_greater_than, call. = FALSE)
   }
+}
+
+# Check if priors were autoscaled
+#
+# @param prior_stuff A list with prior info returned by handle_glm_prior
+# @param has A logical checking, for example, whether the model has_predictors,
+#   has_intercept, has_assoc, etc
+# @param adjusted_prior_scale The prior scale after any autoscaling
+check_if_rescaled <- function(prior_stuff, has, adjusted_prior_scale) {
+  prior_stuff$prior_autoscale && has &&
+    !is.na(prior_stuff$prior_dist_name) &&
+    !all(prior_stuff$prior_scale == adjusted_prior_scale)
 }
 
 # ------------- Helpers ---------------#
@@ -786,4 +855,66 @@ basis_matrix <- function(times, basis, integrate = FALSE) {
     out <- predict(basis, times)
   }
   aa(out)
+}
+
+# Return the fe predictor matrix for estimation
+#
+# @param formula The parsed model formula.
+# @param model_frame The model frame.
+# @return A named list with the following elements:
+#   x: the fe model matrix, not centred and without intercept.
+#   x_bar: the column means of the model matrix.
+#   x_centered: the fe model matrix, centered.
+#   N,K: number of rows (observations) and columns (predictors) in the
+#     fixed effects model matrix
+make_x <- function(formula, model_frame, xlevs = NULL, check_constant = TRUE) {
+
+  # uncentred predictor matrix, without intercept
+  x <- model.matrix(formula, model_frame, xlevs = xlevs)
+  x <- drop_intercept(x)
+
+  # column means of predictor matrix
+  x_bar <- aa(colMeans(x))
+
+  # centered predictor matrix
+  x_centered <- sweep(x, 2, x_bar, FUN = "-")
+
+  # identify any column of x with < 2 unique values (empty interaction levels)
+  sel <- (apply(x, 2L, dplyr::n_distinct) < 2)
+  if (check_constant && any(sel)) {
+    cols <- paste(colnames(x)[sel], collapse = ", ")
+    stop2("Cannot deal with empty interaction levels found in columns: ", cols)
+  }
+
+  nlist(x, x_centered, x_bar, N = NROW(x), K = NCOL(x))
+}
+
+# Rename the t prior as being student-t or cauchy
+#
+# @param prior_stuff A list with prior info returned by handle_glm_prior
+# @param has A logical checking, for example, whether the model has_predictors,
+#   has_intercept, has_assoc, etc
+rename_t_and_cauchy <- function(prior_stuff, has) {
+  if (has && prior_stuff$prior_dist_name %in% "t") {
+    if (all(prior_stuff$prior_df == 1)) {
+      prior_stuff$prior_dist_name <- "cauchy"
+    } else {
+      prior_stuff$prior_dist_name <- "student_t"
+    }
+  }
+  return(prior_stuff)
+}
+
+# Get name of auxiliary parameters for event submodel
+#
+# @param basehaz A list with information about the baseline hazard
+.rename_e_aux <- function(basehaz) {
+  nm <- basehaz$type_name
+  switch(nm,
+         weibull   = "weibull-shape",
+         gompertz  = "gompertz-scale",
+         bs        = "B-spline-coefficients",
+         ms        = "M-spline-coefficients",
+         piecewise = "piecewise-coefficients",
+         NA)
 }
