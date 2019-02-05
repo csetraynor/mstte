@@ -164,6 +164,21 @@ check_if_rescaled <- function(prior_stuff, has, adjusted_prior_scale) {
     !all(prior_stuff$prior_scale == adjusted_prior_scale)
 }
 
+# Check that a stanfit object (or list returned by rstan::optimizing) is valid
+#
+check_stanfit <- function(x) {
+  if (is.list(x)) {
+    if (!all(c("par", "value") %in% names(x)))
+      stop("Invalid object produced please report bug")
+  }
+  else {
+    stopifnot(is(x, "stanfit"))
+    if (x@mode != 0)
+      stop("Invalid stanfit object produced please report bug")
+  }
+  return(TRUE)
+}
+
 # ------------- Helpers ---------------#
 #Compute point estimates and standard errors from pointwise vectors
 #
@@ -178,6 +193,10 @@ table_of_estimates <- function(x) {
   )
   rownames(out) <- colnames(x)
   return(out)
+}
+
+append_trans <- function(x, trans){
+  paste0(x," trans(",i,")" )
 }
 
 

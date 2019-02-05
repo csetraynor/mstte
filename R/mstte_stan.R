@@ -468,7 +468,7 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
   # priors
   user_prior_stuff <- prior_stuff <- lapply(seq_len(nt), function(k)
     handle_glm_prior(prior[[k]],
-                   nvars = standata$K[k],
+                   nvars = standata$s_K[k],
                    default_scale = 2.5,
                    link = NULL,
                    ok_dists = ok_dists)
@@ -549,7 +549,7 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
       adjusted_priorEvent_intercept_scale = prior_intercept_stuff[[k]]$prior_scale,
       adjusted_priorEvent_aux_scale       = prior_aux_stuff[[k]]$prior_scale,
       e_has_intercept  = standata$has_intercept[[k]],
-      e_has_predictors = standata$K[[k]] > 0,
+      e_has_predictors = standata$s_K[[k]] > 0,
       basehaz = basehaz[[k]]
     )
     )
@@ -563,8 +563,8 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
 
   # specify parameters for stan to monitor
   stanpars <- c(if ( any(standata$has_intercept) ) "alpha",
-                if ( any(standata$K) )            "beta",
-                if ( any(standata$nvars)  )       "aux")
+                if ( any(standata$s_K) )            "beta",
+                if ( any(standata$s_vars)  )       "aux")
 
   return(standata)
 
@@ -597,19 +597,31 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
   #  nms_tde    <- get_smooth_name(s_cpts, type = "smooth_coefs") # may be NULL
   #  nms_smooth <- get_smooth_name(s_cpts, type = "smooth_sd")    # may be NULL
 
-  nms_all    <- nruapply(seq_along(1:h), function(i){
-    if(K[[i]] > 0){
-      nms_beta   <- paste0(colnames(x[[i]]),"_",i )
+  nms_all <- lapply(seq_len(nt), function(i){
+    if(s_K[[i]] > 0){
+      nms_beta   <- paste0(colnames(x[[i]])," trans(",i,")" )
     } else {
       nms_beta = NULL
     }
     if(has_intercept[[i]]){
       nms_int    <- paste_i(get_int_name_basehaz(basehaz[[i]]), i)
+    }
+
+  } )
+
+  nms_all    <- nruapply(seq_along(1:h), function(i){
+    if(K[[i]] > 0){
+      nms_beta   <- append_trans(colnames(x[[i]]), i)
+    } else {
+      nms_beta = NULL
+    }
+    if(has_intercept[[i]]){
+      nms_int    <- append_trans(get_int_name_basehaz(basehaz[[i]]), i)
     } else {
       nms_int = NULL
     }
     if(get_basehaz_name(basehaz[[i]]) != "exp"){
-      nms_aux    <- paste_i(get_aux_name_basehaz(basehaz[[i]]), i)
+      nms_aux    <- append_trans(get_aux_name_basehaz(basehaz[[i]]), i)
     } else {
       nms_aux = NULL
     }
@@ -620,17 +632,21 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
   # substitute new parameter names into 'stanfit' object
   stanfit <- replace_stanfit_nms(stanfit, nms_all)
 
+
+  has_tde = FALSE,
+  has_quadrature = FALSE # not implemented
+
   # return an object of class 'stanidm'
   fit <- nlist(stanfit,
                formula,
-               # has_tde,
-               # has_quadrature,
+               has_tde = has_tde,
+               has_quadrature = has_quadrature,
                data,
                model_frame      = mf,
                terms            = mt,
                xlevels          = lapply(seq_along(1:h), function(i) .getXlevels(mt[[i]], mf[[i]]) ),
                x,
-               #s_cpts           = if (has_tde) s_cpts else NULL,
+               s_cpts           = if (has_tde) s_cpts else NULL,
                t_beg,
                t_end,
                status,
@@ -645,14 +661,13 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
                ncensor          = lapply(seq_along(1:h), function(i) nlcens[[i]] + nrcens[[i]] + nicens[[i]]),
                ndelayed         = ndelay,
                prior_info,
-               #  qnodes           = if (has_quadrature) qnodes else NULL,
+               qnodes           = if (has_quadrature) qnodes else NULL,
                algorithm,
-               stan_function    = "stan_idm",
-               rstanarm_version = utils::packageVersion("rstanarm"),
+               stan_function    = "mstte_stan",
+               rstan_version    = utils::packageVersion("rstan"),
                call             = match.call(expand.dots = TRUE))
 
-
-  idmstan(fit)
+  msttestan(fit)
 }
 
 

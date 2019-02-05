@@ -118,6 +118,9 @@ scl.ms$time[scl.ms$time == 0] <- 1e-10 # add small lag time
 
 formula = lapply(1:3, function (x)
   as.formula(Surv(time=time,event=status)~age+score) )
+formula[[1]] =  as.formula(Surv(time=time,event=status)~score)
+formula[[2]] =  as.formula(Surv(time=time,event=status)~age)
+
 
 prior = lapply(1:3, function(x)
   rstanarm::normal() )
@@ -130,3 +133,6 @@ prior_aux = lapply(1:3, function(x)
 
 basehaz = lapply(1:3, function(x)
   "ms")
+basehaz[[1]] = "weibull"
+basehaz[[2]] = "exp"
+
