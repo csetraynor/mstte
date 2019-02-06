@@ -222,6 +222,7 @@
 #' }
 mstte_stan <- function(formula = lapply(1:3, function (x)
   as.formula(Surv(time=time,event=status)~1) ),
+                     transition_labels = NULL,
                      transmat,
                      prep = FALSE,
                      ids,
@@ -240,7 +241,7 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
                        rstanarm::normal() ),
                      prior_PD        = FALSE,
                      algorithm       = c("sampling", "meanfield", "fullrank"),
-                     adapt_delta     = 0.95, ...
+                     adapt_delta     = 0.99, ...
 ){
 
 
@@ -566,8 +567,6 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
                 if ( any(standata$s_K) )            "beta",
                 if ( any(standata$s_vars)  )       "aux")
 
-  return(standata)
-
   #
   # # fit model using stan
   if (algorithm == "sampling") { # mcmc
@@ -593,75 +592,72 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
 
   check_stanfit(stanfit)
 
+
   # define new parameter names
   #  nms_tde    <- get_smooth_name(s_cpts, type = "smooth_coefs") # may be NULL
   #  nms_smooth <- get_smooth_name(s_cpts, type = "smooth_sd")    # may be NULL
 
-  nms_all <- lapply(seq_len(nt), function(i){
-    if(s_K[[i]] > 0){
-      nms_beta   <- paste0(colnames(x[[i]])," trans(",i,")" )
+  nms_int <- lapply(seq_len(nt), function(i) {
+    if(has_intercept[[i]] > 0){
+      append_trans(get_int_name_basehaz(basehaz[[i]]), i, transition_labels[i])
     } else {
-      nms_beta = NULL
+      NULL
     }
-    if(has_intercept[[i]]){
-      nms_int    <- paste_i(get_int_name_basehaz(basehaz[[i]]), i)
-    }
-
   } )
 
-  nms_all    <- nruapply(seq_along(1:h), function(i){
-    if(K[[i]] > 0){
-      nms_beta   <- append_trans(colnames(x[[i]]), i)
+  nms_beta <- lapply(seq_len(nt), function(i) {
+    if(standata$s_K[i] > 0){
+      append_trans(colnames(x[[i]]), i, transition_labels[i])
     } else {
-      nms_beta = NULL
+      NULL
     }
-    if(has_intercept[[i]]){
-      nms_int    <- append_trans(get_int_name_basehaz(basehaz[[i]]), i)
-    } else {
-      nms_int = NULL
-    }
+  } )
+
+  nms_aux <- lapply(seq_len(nt), function(i) {
     if(get_basehaz_name(basehaz[[i]]) != "exp"){
-      nms_aux    <- append_trans(get_aux_name_basehaz(basehaz[[i]]), i)
+      append_trans(get_aux_name_basehaz(basehaz[[i]]), i, transition_labels[i])
     } else {
-      nms_aux = NULL
+      NULL
     }
-    c( nms_int, nms_beta, nms_aux)
-  })
+  } )
+
+  nms_all <- ulist( c( nms_int, nms_beta, nms_aux) )
 
   nms_all <- c(nms_all, "log-posterior")
   # substitute new parameter names into 'stanfit' object
   stanfit <- replace_stanfit_nms(stanfit, nms_all)
 
 
-  has_tde = FALSE,
-  has_quadrature = FALSE # not implemented
+  has_tde = rep(FALSE, nt)
+  has_quadrature = rep( FALSE, nt) # not implemented
 
-  # return an object of class 'stanidm'
+  # return an object of class 'stanmstte'
   fit <- nlist(stanfit,
                formula,
                has_tde = has_tde,
                has_quadrature = has_quadrature,
                data,
+               transition_labels,
                model_frame      = mf,
                terms            = mt,
-               xlevels          = lapply(seq_along(1:h), function(i) .getXlevels(mt[[i]], mf[[i]]) ),
+               xlevels          = lapply(seq_along(1:nt), function(i) .getXlevels(mt[[i]], mf[[i]]) ),
                x,
-               s_cpts           = if (has_tde) s_cpts else NULL,
+               s_cpts           = if (any(has_tde)) s_cpts else NULL,
                t_beg,
                t_end,
                status,
-               event            = lapply(seq_along(1:h), function(i) as.logical(status[[i]] == 1) ),
+               event            = lapply(seq_along(1:nt), function(i) as.logical(status[[i]] == 1) ),
                delayed,
                basehaz,
-               nobs             = lapply(seq_along(1:h), function(i) nrow(mf[[i]]) ),
+               nobs             = lapply(seq_along(1:nt), function(i) nrow(mf[[i]]) ),
                nevents          = nevent,
                nlcens,
                nrcens,
                nicens,
-               ncensor          = lapply(seq_along(1:h), function(i) nlcens[[i]] + nrcens[[i]] + nicens[[i]]),
+               ncensor          = lapply(seq_along(1:nt), function(i) nlcens[[i]] + nrcens[[i]] + nicens[[i]]),
                ndelayed         = ndelay,
                prior_info,
-               qnodes           = if (has_quadrature) qnodes else NULL,
+               qnodes           = if (any(has_quadrature)) qnodes else NULL,
                algorithm,
                stan_function    = "mstte_stan",
                rstan_version    = utils::packageVersion("rstan"),
@@ -670,90 +666,6 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
   msttestan(fit)
 }
 
-
-
-handle_newdata <- function(formula01,
-                           formula02,
-                           formula12,
-                           data,
-                           basehaz01 = "ms",
-                           basehaz02 = "ms",
-                           basehaz12 = "ms",
-                           basehaz_ops01,
-                           basehaz_ops02,
-                           basehaz_ops12,
-                           prior01           = rstanarm::normal(),
-                           prior_intercept01 = rstanarm::normal(),
-                           prior_aux01       = rstanarm::normal(),
-                           prior02           = rstanarm::normal(),
-                           prior_intercept02 = rstanarm::normal(),
-                           prior_aux02       = rstanarm::normal(),
-                           prior12           = rstanarm::normal(),
-                           prior_intercept12 = rstanarm::normal(),
-                           prior_aux12       = rstanarm::normal(),
-                           prior_PD        = FALSE,
-                           algorithm       = c("sampling", "meanfield", "fullrank"),
-                           adapt_delta     = 0.95, ...
-){
-
-
-  #-----------------------------
-  # Pre-processing of arguments
-  #-----------------------------
-
-  if (!requireNamespace("survival"))
-    stop("the 'survival' package must be installed to use this function.")
-
-  if (missing(basehaz_ops01))
-    basehaz_ops01 <- NULL
-  if (missing(basehaz_ops02))
-    basehaz_ops02 <- NULL
-  if (missing(basehaz_ops12))
-    basehaz_ops12 <- NULL
-  basehaz_ops <- list(basehaz_ops01, basehaz_ops02, basehaz_ops12)
-
-  if (missing(data) || !inherits(data, "data.frame"))
-    stop("'data' must be a data frame.")
-
-  dots      <- list(...)
-  algorithm <- match.arg(algorithm)
-
-
-
-  ## Parse formula
-
-  formula <- list(formula01, formula02, formula12)
-  h <- length(formula)
-
-  formula <- lapply(formula, function(f) parse_formula(f, data))
-
-  ## Create data
-  data01 <- nruapply(0:1, function(o){
-    lapply(0:1, function(p) make_model_data(formula = formula[[1]], aux_formula = formula[[2]], data = data, cens = p, aux_cens = o))
-  }) # row subsetting etc.
-
-  data02 <- nruapply(0:1, function(o){
-    lapply(0:1, function(p) make_model_data(formula = formula[[2]], aux_formula = formula[[1]], data = data, cens = p, aux_cens = o))
-  }) # row subsetting etc.
-
-  data02 <- handle_data(data02)
-
-  data12 <- lapply(0:1, function(p) make_model_data(formula = formula[[3]], aux_formula = formula[[1]], data = data, cens = p, aux_cens = 1) ) # row subsetting etc.
-
-  nd01 <- sapply(data01, function(d) nrow(d))
-  nd02 <- sapply(data02, function(d) nrow(d))
-  nd12 <- sapply(data12, function(d) nrow(d))
-
-  ind01 <- cumsum(nd01)
-  ind02 <- cumsum(nd02)
-  ind12 <- cumsum(nd12)
-
-  data01 <- do.call(rbind, data01)
-  data02 <- do.call(rbind, data02)
-  data12 <- do.call(rbind, data12)
-
-  list(data01, data02, data12)
-}
 
 # Return the integer respresentation for the baseline hazard, used by Stan
 #

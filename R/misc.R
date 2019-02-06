@@ -68,6 +68,13 @@ uapply <- function(X, FUN, ...) {
   unlist(lapply(X, FUN, ...))
 }
 
+# Unlist the result from an lapply call not recursive
+#
+# @param X,FUN,... Same as lapply
+nonrecuapply <- function(X, FUN, ...) {
+  unlist(lapply(X, FUN, ...), recursive = FALSE)
+}
+
 # Stop without printing call
 stop2    <- function(...) stop(..., call. = FALSE)
 
@@ -81,6 +88,16 @@ SW <- function(expr) base::suppressWarnings(expr)
 is_null <- function(x) {
   is.null(x) || ifelse(is.vector(x), all(sapply(x, is.null)), FALSE)
 }
+
+# Recursively removes NULL entries from an object
+rm_null <- function(x, recursive = TRUE) {
+  x <- Filter(Negate(is_null), x)
+  if (recursive) {
+    x <- lapply(x, function(x) if (is.list(x)) rm_null(x) else x)
+  }
+  x
+}
+
 # Shorthand for as.integer, as.double, as.matrix, as.array
 ai <- function(x, ...) as.integer(x, ...)
 ad <- function(x, ...) as.double (x, ...)
@@ -124,6 +141,20 @@ qtile <- function(x, nq = 2) {
 }
 
 # -------------- Sanity checks ---------#
+
+# Issue warning if high rhat values
+#
+# @param rhats Vector of rhat values.
+# @param threshold Threshold value. If any rhat values are above threshold a
+#   warning is issued.
+check_rhats <- function(rhats, threshold = 1.1, check_lp = FALSE) {
+  if (!check_lp)
+    rhats <- rhats[!names(rhats) %in% c("lp__", "log-posterior")]
+
+  if (any(rhats > threshold, na.rm = TRUE))
+    warning("Markov chains did not converge! Do not analyze results!",
+            call. = FALSE, noBreaks. = TRUE)
+}
 
 # Check that a tmat is concordant with
 # a formula list
@@ -195,10 +226,64 @@ table_of_estimates <- function(x) {
   return(out)
 }
 
-append_trans <- function(x, trans){
-  paste0(x," trans(",i,")" )
+append_trans <- function(x, i, labs){
+  if(is.null(labs)){
+    paste0(x," trans(",i,")" )
+  } else {
+    paste0(x," trans(",labs,")" )
+  }
 }
 
+# Return the name for the intercept parameter
+get_int_name_basehaz <- function(x, is_jm = FALSE, ...) {
+  if (is_jm || has_intercept(x)) "(Intercept)" else NULL
+}
+
+# Return the names for the auxiliary parameters
+get_aux_name_basehaz <- function(x, ...) {
+  switch(get_basehaz_name(x),
+         exp       = NULL,
+         weibull   = "weibull-shape",
+         gompertz  = "gompertz-scale",
+         ms        = paste0("m-splines-coef", seq(x$nvars)),
+         bs        = paste0("b-splines-coef", seq(x$nvars)),
+         piecewise = paste0("piecewise-coef", seq(x$nvars)),
+         NA)
+}
+
+# Wrapper for rstan::summary
+# @param stanfit A stanfit object created using rstan::sampling or rstan::vb
+# @return A matrix of summary stats
+make_stan_summary <- function(stanfit) {
+  levs <- c(0.5, 0.8, 0.95)
+  qq <- (1 - levs) / 2
+  probs <- sort(c(0.5, qq, 1 - qq))
+  rstan::summary(stanfit, probs = probs, digits = 10)$summary
+}
+
+# Get the correct column name to use for selecting the median
+#
+# @param algorithm String naming the estimation algorithm (probably
+#   \code{fit$algorithm}).
+# @return Either \code{"50%"} or \code{"Median"} depending on \code{algorithm}.
+select_median <- function(algorithm) {
+  switch(algorithm,
+         sampling = "50%",
+         meanfield = "50%",
+         fullrank = "50%",
+         optimizing = "Median",
+         stop("Bug found (incorrect algorithm name passed to select_median)",
+              call. = FALSE))
+}
+# Replace the parameter names slot of an object of class 'stanfit'.
+#
+# @param stanfit An object of class 'stanfit'.
+# @param new_nms A character vector of new parameter names.
+# @return A 'stanfit' object.
+replace_stanfit_nms <- function(stanfit, new_nms) {
+  stanfit@sim$fnames_oi <- new_nms
+  stanfit
+}
 
 # Check formula object
 #
@@ -936,4 +1021,80 @@ rename_t_and_cauchy <- function(prior_stuff, has) {
          ms        = "M-spline-coefficients",
          piecewise = "piecewise-coefficients",
          NA)
+}
+
+
+
+# Set arguments for sampling
+#
+# Prepare a list of arguments to use with \code{rstan::sampling} via
+# \code{do.call}.
+#
+# @param object The stanfit object to use for sampling.
+# @param user_dots The contents of \code{...} from the user's call to
+#   the \code{stan_*} modeling function.
+# @param user_adapt_delta The value for \code{adapt_delta} specified by the
+#   user.
+# @param prior Prior distribution list (can be NULL).
+# @param ... Other arguments to \code{\link[rstan]{sampling}} not coming from
+#   \code{user_dots} (e.g. \code{data}, \code{pars}, \code{init}, etc.)
+# @return A list of arguments to use for the \code{args} argument for
+#   \code{do.call(sampling, args)}.
+set_sampling_args <- function(object, prior, user_dots = list(),
+                              user_adapt_delta = NULL, ...) {
+  args <- list(object = object, ...)
+  unms <- names(user_dots)
+  for (j in seq_along(user_dots)) {
+    args[[unms[j]]] <- user_dots[[j]]
+  }
+  defaults <- default_stan_control(prior = prior,
+                                   adapt_delta = user_adapt_delta)
+
+  if (!"control" %in% unms) {
+    # no user-specified 'control' argument
+    args$control <- defaults
+  } else {
+    # user specifies a 'control' argument
+    if (!is.null(user_adapt_delta)) {
+      # if user specified adapt_delta argument to stan_* then
+      # set control$adapt_delta to user-specified value
+      args$control$adapt_delta <- user_adapt_delta
+    } else {
+      # use default adapt_delta for the user's chosen prior
+      args$control$adapt_delta <- defaults$adapt_delta
+    }
+    if (is.null(args$control$max_treedepth)) {
+      # if user's 'control' has no max_treedepth set it to rstanarm default
+      args$control$max_treedepth <- defaults$max_treedepth
+    }
+  }
+  args$save_warmup <- FALSE
+
+  return(args)
+}
+
+# Default control arguments for sampling
+#
+# Called by set_sampling_args to set the default 'control' argument for
+# \code{rstan::sampling} if none specified by user. This allows the value of
+# \code{adapt_delta} to depend on the prior.
+#
+# @param prior Prior distribution list (can be NULL).
+# @param adapt_delta User's \code{adapt_delta} argument.
+# @param max_treedepth Default for \code{max_treedepth}.
+# @return A list with \code{adapt_delta} and \code{max_treedepth}.
+default_stan_control <- function(prior, adapt_delta = NULL,
+                                 max_treedepth = 15L) {
+  if (!length(prior)) {
+    if (is.null(adapt_delta)) adapt_delta <- 0.95
+  } else if (is.null(adapt_delta)) {
+    adapt_delta <- switch(prior$dist,
+                          "R2" = 0.99,
+                          "hs" = 0.99,
+                          "hs_plus" = 0.99,
+                          "lasso" = 0.99,
+                          "product_normal" = 0.99,
+                          0.95) # default
+  }
+  nlist(adapt_delta, max_treedepth)
 }
