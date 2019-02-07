@@ -37,11 +37,13 @@ basehaz[[2]] = "exp"
 
 stanfit <- mstte_stan(formula = formula,
                      data = ebmt.mstate,
+                     transition_labels = c("DP", "DX", "DPDX"),
                      basehaz = basehaz,
-                     prior           = prior,
+                     prior           = lapply(1:3, function(x)
+                       rstanarm::normal() ),
                      prior_intercept = prior_intercept,
                      prior_aux       = prior_aux,
-                     iter = 1000,
+                     iter = 1,
                      chains = 2,
                      control = list(adapt_delta = 0.8)
 )

@@ -638,6 +638,7 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
                has_quadrature = has_quadrature,
                data,
                transition_labels,
+               length_of_transition = nt,
                model_frame      = mf,
                terms            = mt,
                xlevels          = lapply(seq_along(1:nt), function(i) .getXlevels(mt[[i]], mf[[i]]) ),

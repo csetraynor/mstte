@@ -210,6 +210,15 @@ check_stanfit <- function(x) {
   return(TRUE)
 }
 
+# Test if an object inherits a specific stanreg class
+#
+# @param x The object to test.
+is.stanreg   <- function(x) inherits(x, "stanreg")
+is.stansurv  <- function(x) inherits(x, "stansurv")
+is.stanmvreg <- function(x) inherits(x, "stanmvreg")
+is.stanjm    <- function(x) inherits(x, "stanjm")
+is.stanmstte <- function(x) inherits(x, "stanmstte")
+
 # ------------- Helpers ---------------#
 #Compute point estimates and standard errors from pointwise vectors
 #
@@ -234,6 +243,19 @@ append_trans <- function(x, i, labs){
   }
 }
 
+append_title <- function(object){
+  if(is.null(object$transition_labels)){
+    paste("\nTransition", seq_len(object$length_of_transition),"\n")
+  } else {
+    paste("\nTransition", object$transition_labels,"\n")
+  }
+}
+
+get_transition_name <- function(obj, i){
+
+  append_trans(NULL, i, obj$transition_labels[i])
+}
+
 # Return the name for the intercept parameter
 get_int_name_basehaz <- function(x, is_jm = FALSE, ...) {
   if (is_jm || has_intercept(x)) "(Intercept)" else NULL
@@ -249,6 +271,35 @@ get_aux_name_basehaz <- function(x, ...) {
          bs        = paste0("b-splines-coef", seq(x$nvars)),
          piecewise = paste0("piecewise-coef", seq(x$nvars)),
          NA)
+}
+
+#' Extract X, Y or Z from a stanreg object
+#'
+#' @keywords internal
+#' @export
+#' @param ... Other arguments passed to methods. For a \code{stanmvreg} object
+#'   this can be an integer \code{m} specifying the submodel.
+#' @return For \code{get_x} and \code{get_z}, a matrix. For \code{get_y}, either
+#'   a vector or a matrix, depending on how the response variable was specified.
+get_y <- function(object, ...) UseMethod("get_y")
+#' @rdname get_y
+#' @export
+get_x <- function(object, ...) UseMethod("get_x")
+#' @export
+get_y.default <- function(object, ...) {
+  object[["y"]] %ORifNULL% model.response(model.frame(object))
+}
+#' @export
+get_x.default <- function(object, ...) {
+  object[["x"]] %ORifNULL% model.matrix(object)
+}
+#' @export
+get_y.stanmstte <- function(object, ind, ...) {
+  object[["y"]][[ind]] %ORifNULL% model.response(model.frame(object))
+}
+#' @export
+get_x.default <- function(object, ind, ...) {
+  object[["x"]][[ind]] %ORifNULL% model.matrix(object)
 }
 
 # Wrapper for rstan::summary
@@ -315,6 +366,29 @@ validate_surv <- function(x, ok_types = c("right", "counting",
   if (!attr(x, "type") %in% ok_types)
     stop2("Surv object type must be one of: ", comma(ok_types))
   x
+}
+
+# If a is NULL (and Inf, respectively) return b, otherwise just return a
+# @param a,b Objects
+`%ORifNULL%` <- function(a, b) {
+  if (is.null(a)) b else a
+}
+`%ORifINF%` <- function(a, b) {
+  if (a == Inf) b else a
+}
+
+
+# Return the list with summary information about the baseline hazard
+#
+# @return A named list.
+get_basehaz <- function(x, ind) {
+  if (is.stansurv(x))
+    return(x$basehaz)
+  if (is.stanjm(x))
+    return(x$survmod$basehaz)
+  if (is.stanmstte(x))
+    return(x$basehaz[[ind]])
+  stop("Bug found: could not find basehaz.")
 }
 
 
@@ -901,7 +975,7 @@ has_intercept <- function(basehaz) {
 # Return the name of the baseline hazard
 #
 # @return A character string.
-get_basehaz_name <- function(x) {
+get_basehaz_name <- function(x, ind) {
   if (is.character(x))
     return(x)
   if (is.stansurv(x))
@@ -910,6 +984,8 @@ get_basehaz_name <- function(x) {
     return(x$survmod$basehaz$type_name)
   if (is.character(x$type_name))
     return(x$type_name)
+  if (is.stanmstte(x))
+    return(x$basehaz[[ind]]$type_name)
   stop("Bug found: could not resolve basehaz name.")
 }
 
