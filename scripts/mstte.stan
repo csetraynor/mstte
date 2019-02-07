@@ -538,7 +538,8 @@ model {
   vector[Nrcens] eta_rcens;  // time of right censoring
   vector[Nevent] eta_event;  // time of events
 
-  // define iterators
+  {
+    // define iterators
     int pos;
     int pos_e;
     int pos_i_e;
@@ -628,7 +629,7 @@ model {
        matrix[s_event[k], s_vars[k]] iBasis_event = to_matrix(
         segment(ibasis_event, pos_spline_event, s_event[k] * s_vars[k]),
          s_event[k], s_vars[k] );
-      matrix[s_event[k], s_vars[k]] Basis_event = to_matrix(
+       matrix[s_event[k], s_vars[k]] Basis_event = to_matrix(
         segment(basis_event, pos_spline_event, s_event[k] * s_vars[k]),
          s_event[k], s_vars[k] );
        target += mspline_log_haz( segment(eta_event, pos_i_e, s_event[k]),
@@ -651,7 +652,6 @@ model {
      if(s_event[k] > 0) target += gompertz_log_haz( segment(eta_event, pos_i_e, s_event[k]), segment(t_event, pos_i_e, s_event[k]), scale);
      if(s_event[k] > 0) target += gompertz_log_surv( segment(eta_event, pos_i_e, s_event[k]), segment(t_event, pos_i_e, s_event[k]), scale);
      if(s_rcens[k] > 0) target += gompertz_log_surv( segment(eta_rcens, pos_i_rc, s_rcens[k]), segment(t_rcens, pos_i_rc, s_rcens[k]), scale);
-     pos_coefs += 1;
 
   } else {
     reject("Bug found: invalid baseline hazard (without quadrature).");
@@ -691,6 +691,9 @@ model {
        real dummy = basehaz_lp(segment(z_coefs, pos, s_vars[k]), prior_dist_for_aux[k], segment(prior_df_for_aux, pos, s_vars[k])); }
   pos += s_vars[k];
   }
+
+  }
+
 
 }
 

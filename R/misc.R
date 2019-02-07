@@ -106,6 +106,45 @@ aa <- function(x, ...) as.array  (x, ...)
 # Safe deparse
 safe_deparse <- function(expr) deparse(expr, 500L)
 
+
+# If a is NULL (and Inf, respectively) return b, otherwise just return a
+# @param a,b Objects
+`%ORifNULL%` <- function(a, b) {
+  if (is.null(a)) b else a
+}
+`%ORifINF%` <- function(a, b) {
+  if (a == Inf) b else a
+}
+
+
+# Return the list with summary information about the baseline hazard
+#
+# @return A named list.
+get_basehaz <- function(x, ind) {
+  if (is.stansurv(x))
+    return(x$basehaz)
+  if (is.stanjm(x))
+    return(x$survmod$basehaz)
+  if (is.stanmstte(x))
+    return(x$basehaz[[ind]])
+  stop("Bug found: could not find basehaz.")
+}
+
+# Get the posterior sample size
+#
+# @param x A stanreg object
+# @return the posterior sample size (or size of sample from approximate posterior)
+posterior_sample_size <- function(x) {
+  validate_stanmstte_object(x)
+  if (used.optimizing(x)) {
+    return(NROW(x$asymptotic_sampling_dist))
+  }
+  pss <- x$stanfit@sim$n_save
+  if (used.variational(x))
+    return(pss)
+  sum(pss - x$stanfit@sim$warmup2)
+}
+
 # Maybe broadcast
 #
 # @param x A vector or scalar.
@@ -219,7 +258,43 @@ is.stanmvreg <- function(x) inherits(x, "stanmvreg")
 is.stanjm    <- function(x) inherits(x, "stanjm")
 is.stanmstte <- function(x) inherits(x, "stanmstte")
 
+# Test for a given estimation method
+#
+# @param x A stanreg object.
+used.optimizing <- function(x) {
+  x$algorithm == "optimizing"
+}
+used.sampling <- function(x) {
+  x$algorithm == "sampling"
+}
+used.variational <- function(x) {
+  x$algorithm %in% c("meanfield", "fullrank")
+}
+
+
 # ------------- Helpers ---------------#
+# Combine pars and regex_pars
+#
+# @param x stanreg object
+# @param pars Character vector of parameter names
+# @param regex_pars Character vector of patterns
+collect_pars <- function(x, pars = NULL, regex_pars = NULL) {
+  if (is.null(pars) && is.null(regex_pars))
+    return(NULL)
+  if (!is.null(pars))
+    pars[pars == "varying"] <- "b"
+  if (!is.null(regex_pars))
+    pars <- c(pars, grep_for_pars(x, regex_pars))
+  unique(pars)
+}
+# Grep for "b" parameters (ranef)
+#
+# @param x Character vector (often rownames(fit$stan_summary))
+# @param ... Passed to grep
+b_names <- function(x, ...) {
+  grep("^b\\[", x, ...)
+}
+
 #Compute point estimates and standard errors from pointwise vectors
 #
 # @param x A matrix.
@@ -368,28 +443,15 @@ validate_surv <- function(x, ok_types = c("right", "counting",
   x
 }
 
-# If a is NULL (and Inf, respectively) return b, otherwise just return a
-# @param a,b Objects
-`%ORifNULL%` <- function(a, b) {
-  if (is.null(a)) b else a
-}
-`%ORifINF%` <- function(a, b) {
-  if (a == Inf) b else a
-}
-
-
-# Return the list with summary information about the baseline hazard
+# Throw error if object isn't a stanreg object
 #
-# @return A named list.
-get_basehaz <- function(x, ind) {
-  if (is.stansurv(x))
-    return(x$basehaz)
-  if (is.stanjm(x))
-    return(x$survmod$basehaz)
-  if (is.stanmstte(x))
-    return(x$basehaz[[ind]])
-  stop("Bug found: could not find basehaz.")
+# @param x The object to test.
+validate_stanmstte_object <- function(x, call. = FALSE) {
+  if (!is.stanmstte(x))
+    stop("Object is not a stanmstee object.", call. = call.)
 }
+
+
 
 
 

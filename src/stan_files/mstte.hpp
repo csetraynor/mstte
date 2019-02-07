@@ -36,7 +36,7 @@ static int current_statement_begin__;
 stan::io::program_reader prog_reader__() {
     stan::io::program_reader reader;
     reader.add_event(0, 0, "start", "model_mstte");
-    reader.add_event(724, 722, "end", "model_mstte");
+    reader.add_event(725, 723, "end", "model_mstte");
     return reader;
 }
 
@@ -2124,7 +2124,7 @@ public:
             check_greater_or_equal(function__,"nt",nt,1);
             current_statement_begin__ = 378;
             for (int k0__ = 0; k0__ < nt; ++k0__) {
-                check_greater_or_equal(function__,"s_K[k0__]",s_K[k0__],1);
+                check_greater_or_equal(function__,"s_K[k0__]",s_K[k0__],0);
             }
             current_statement_begin__ = 379;
             check_greater_or_equal(function__,"nK",nK,0);
@@ -2475,83 +2475,86 @@ public:
 
             stan::math::initialize(eta_event, DUMMY_VAR__);
             stan::math::fill(eta_event,DUMMY_VAR__);
-            current_statement_begin__ = 542;
+
+
+            {
+            current_statement_begin__ = 543;
             int pos(0);
             (void) pos;  // dummy to suppress unused var warning
 
             stan::math::fill(pos, std::numeric_limits<int>::min());
-            current_statement_begin__ = 543;
+            current_statement_begin__ = 544;
             int pos_e(0);
             (void) pos_e;  // dummy to suppress unused var warning
 
             stan::math::fill(pos_e, std::numeric_limits<int>::min());
-            current_statement_begin__ = 544;
+            current_statement_begin__ = 545;
             int pos_i_e(0);
             (void) pos_i_e;  // dummy to suppress unused var warning
 
             stan::math::fill(pos_i_e, std::numeric_limits<int>::min());
-            current_statement_begin__ = 545;
+            current_statement_begin__ = 546;
             int pos_rc(0);
             (void) pos_rc;  // dummy to suppress unused var warning
 
             stan::math::fill(pos_rc, std::numeric_limits<int>::min());
-            current_statement_begin__ = 546;
+            current_statement_begin__ = 547;
             int pos_i_rc(0);
             (void) pos_i_rc;  // dummy to suppress unused var warning
 
             stan::math::fill(pos_i_rc, std::numeric_limits<int>::min());
-            current_statement_begin__ = 547;
+            current_statement_begin__ = 548;
             int pos_b(0);
             (void) pos_b;  // dummy to suppress unused var warning
 
             stan::math::fill(pos_b, std::numeric_limits<int>::min());
-            current_statement_begin__ = 548;
+            current_statement_begin__ = 549;
             int pos_g(0);
             (void) pos_g;  // dummy to suppress unused var warning
 
             stan::math::fill(pos_g, std::numeric_limits<int>::min());
-            current_statement_begin__ = 549;
+            current_statement_begin__ = 550;
             int pos_coefs(0);
             (void) pos_coefs;  // dummy to suppress unused var warning
 
             stan::math::fill(pos_coefs, std::numeric_limits<int>::min());
-            current_statement_begin__ = 550;
+            current_statement_begin__ = 551;
             int pos_vars(0);
             (void) pos_vars;  // dummy to suppress unused var warning
 
             stan::math::fill(pos_vars, std::numeric_limits<int>::min());
-            current_statement_begin__ = 551;
+            current_statement_begin__ = 552;
             int pos_spline_event(0);
             (void) pos_spline_event;  // dummy to suppress unused var warning
 
             stan::math::fill(pos_spline_event, std::numeric_limits<int>::min());
-            current_statement_begin__ = 552;
+            current_statement_begin__ = 553;
             int pos_spline_rcens(0);
             (void) pos_spline_rcens;  // dummy to suppress unused var warning
 
             stan::math::fill(pos_spline_rcens, std::numeric_limits<int>::min());
 
 
-            current_statement_begin__ = 555;
-            stan::math::assign(pos_e, 1);
             current_statement_begin__ = 556;
-            stan::math::assign(pos_i_e, 1);
+            stan::math::assign(pos_e, 1);
             current_statement_begin__ = 557;
-            stan::math::assign(pos_rc, 1);
+            stan::math::assign(pos_i_e, 1);
             current_statement_begin__ = 558;
-            stan::math::assign(pos_i_rc, 1);
+            stan::math::assign(pos_rc, 1);
             current_statement_begin__ = 559;
-            stan::math::assign(pos_b, 1);
+            stan::math::assign(pos_i_rc, 1);
             current_statement_begin__ = 560;
+            stan::math::assign(pos_b, 1);
+            current_statement_begin__ = 561;
             for (int k = 1; k <= nt; ++k) {
 
-                current_statement_begin__ = 561;
+                current_statement_begin__ = 562;
                 if (as_bool(logical_gt(get_base1(s_K,k,"s_K",1),0))) {
 
-                    current_statement_begin__ = 562;
+                    current_statement_begin__ = 563;
                     if (as_bool(logical_gt(get_base1(s_event,k,"s_event",1),0))) {
                         {
-                        current_statement_begin__ = 563;
+                        current_statement_begin__ = 564;
                         validate_non_negative_index("X_event", "get_base1(s_event,k,\"s_event\",1)", get_base1(s_event,k,"s_event",1));
                         validate_non_negative_index("X_event", "get_base1(s_K,k,\"s_K\",1)", get_base1(s_K,k,"s_K",1));
                         Eigen::Matrix<local_scalar_t__,Eigen::Dynamic,Eigen::Dynamic>  X_event(static_cast<Eigen::VectorXd::Index>(get_base1(s_event,k,"s_event",1)),static_cast<Eigen::VectorXd::Index>(get_base1(s_K,k,"s_K",1)));
@@ -2561,19 +2564,19 @@ public:
                         stan::math::fill(X_event,DUMMY_VAR__);
 
 
-                        current_statement_begin__ = 564;
+                        current_statement_begin__ = 565;
                         stan::math::assign(X_event, to_matrix(segment(x_event,pos_e,(get_base1(s_event,k,"s_event",1) * get_base1(s_K,k,"s_K",1))),get_base1(s_event,k,"s_event",1),get_base1(s_K,k,"s_K",1)));
-                        current_statement_begin__ = 567;
+                        current_statement_begin__ = 568;
                         stan::model::assign(eta_event, 
                                     stan::model::cons_list(stan::model::index_min_max(pos_i_e, ((pos_i_e + get_base1(s_event,k,"s_event",1)) - 1)), stan::model::nil_index_list()), 
                                     multiply(X_event,segment(beta,pos_b,get_base1(s_K,k,"s_K",1))), 
                                     "assigning variable eta_event");
                         }
                     }
-                    current_statement_begin__ = 569;
+                    current_statement_begin__ = 570;
                     if (as_bool(logical_gt(get_base1(s_rcens,k,"s_rcens",1),0))) {
                         {
-                        current_statement_begin__ = 570;
+                        current_statement_begin__ = 571;
                         validate_non_negative_index("X_rcens", "get_base1(s_rcens,k,\"s_rcens\",1)", get_base1(s_rcens,k,"s_rcens",1));
                         validate_non_negative_index("X_rcens", "get_base1(s_K,k,\"s_K\",1)", get_base1(s_K,k,"s_K",1));
                         Eigen::Matrix<local_scalar_t__,Eigen::Dynamic,Eigen::Dynamic>  X_rcens(static_cast<Eigen::VectorXd::Index>(get_base1(s_rcens,k,"s_rcens",1)),static_cast<Eigen::VectorXd::Index>(get_base1(s_K,k,"s_K",1)));
@@ -2584,7 +2587,7 @@ public:
                         stan::math::assign(X_rcens,to_matrix(segment(x_rcens,pos_rc,(get_base1(s_rcens,k,"s_rcens",1) * get_base1(s_K,k,"s_K",1))),get_base1(s_rcens,k,"s_rcens",1),get_base1(s_K,k,"s_K",1)));
 
 
-                        current_statement_begin__ = 573;
+                        current_statement_begin__ = 574;
                         stan::model::assign(eta_rcens, 
                                     stan::model::cons_list(stan::model::index_min_max(pos_i_rc, ((pos_i_rc + get_base1(s_rcens,k,"s_rcens",1)) - 1)), stan::model::nil_index_list()), 
                                     multiply(X_rcens,segment(beta,pos_b,get_base1(s_K,k,"s_K",1))), 
@@ -2592,94 +2595,94 @@ public:
                         }
                     }
                 }
-                current_statement_begin__ = 576;
-                stan::math::assign(pos_e, (pos_e + (get_base1(s_event,k,"s_event",1) * get_base1(s_K,k,"s_K",1))));
                 current_statement_begin__ = 577;
-                stan::math::assign(pos_i_e, (pos_i_e + get_base1(s_event,k,"s_event",1)));
+                stan::math::assign(pos_e, (pos_e + (get_base1(s_event,k,"s_event",1) * get_base1(s_K,k,"s_K",1))));
                 current_statement_begin__ = 578;
-                stan::math::assign(pos_rc, (pos_rc + (get_base1(s_rcens,k,"s_rcens",1) * get_base1(s_K,k,"s_K",1))));
+                stan::math::assign(pos_i_e, (pos_i_e + get_base1(s_event,k,"s_event",1)));
                 current_statement_begin__ = 579;
-                stan::math::assign(pos_i_rc, (pos_i_rc + get_base1(s_rcens,k,"s_rcens",1)));
+                stan::math::assign(pos_rc, (pos_rc + (get_base1(s_rcens,k,"s_rcens",1) * get_base1(s_K,k,"s_K",1))));
                 current_statement_begin__ = 580;
+                stan::math::assign(pos_i_rc, (pos_i_rc + get_base1(s_rcens,k,"s_rcens",1)));
+                current_statement_begin__ = 581;
                 stan::math::assign(pos_b, (pos_b + get_base1(s_K,k,"s_K",1)));
             }
-            current_statement_begin__ = 585;
-            stan::math::assign(pos_i_e, 1);
             current_statement_begin__ = 586;
-            stan::math::assign(pos_i_rc, 1);
+            stan::math::assign(pos_i_e, 1);
             current_statement_begin__ = 587;
-            stan::math::assign(pos_g, 1);
+            stan::math::assign(pos_i_rc, 1);
             current_statement_begin__ = 588;
+            stan::math::assign(pos_g, 1);
+            current_statement_begin__ = 589;
             for (int k = 1; k <= nt; ++k) {
 
-                current_statement_begin__ = 589;
+                current_statement_begin__ = 590;
                 if (as_bool(logical_eq(get_base1(has_intercept,k,"has_intercept",1),1))) {
 
-                    current_statement_begin__ = 590;
+                    current_statement_begin__ = 591;
                     stan::model::assign(eta_event, 
                                 stan::model::cons_list(stan::model::index_min_max(pos_i_e, ((pos_i_e + get_base1(s_event,k,"s_event",1)) - 1)), stan::model::nil_index_list()), 
                                 add(stan::model::rvalue(eta_event, stan::model::cons_list(stan::model::index_min_max(pos_i_e, ((pos_i_e + get_base1(s_event,k,"s_event",1)) - 1)), stan::model::nil_index_list()), "eta_event"), get_base1(gamma,pos_g,"gamma",1)), 
                                 "assigning variable eta_event");
-                    current_statement_begin__ = 591;
+                    current_statement_begin__ = 592;
                     stan::model::assign(eta_rcens, 
                                 stan::model::cons_list(stan::model::index_min_max(pos_i_rc, ((pos_i_rc + get_base1(s_rcens,k,"s_rcens",1)) - 1)), stan::model::nil_index_list()), 
                                 add(stan::model::rvalue(eta_rcens, stan::model::cons_list(stan::model::index_min_max(pos_i_rc, ((pos_i_rc + get_base1(s_rcens,k,"s_rcens",1)) - 1)), stan::model::nil_index_list()), "eta_rcens"), get_base1(gamma,pos_g,"gamma",1)), 
                                 "assigning variable eta_rcens");
-                    current_statement_begin__ = 592;
+                    current_statement_begin__ = 593;
                     stan::math::assign(pos_g, (pos_g + 1));
                 }
-                current_statement_begin__ = 594;
-                stan::math::assign(pos_i_e, (pos_i_e + get_base1(s_event,k,"s_event",1)));
                 current_statement_begin__ = 595;
+                stan::math::assign(pos_i_e, (pos_i_e + get_base1(s_event,k,"s_event",1)));
+                current_statement_begin__ = 596;
                 stan::math::assign(pos_i_rc, (pos_i_rc + get_base1(s_rcens,k,"s_rcens",1)));
             }
-            current_statement_begin__ = 599;
-            stan::math::assign(pos_i_e, 1);
             current_statement_begin__ = 600;
-            stan::math::assign(pos_i_rc, 1);
+            stan::math::assign(pos_i_e, 1);
             current_statement_begin__ = 601;
+            stan::math::assign(pos_i_rc, 1);
+            current_statement_begin__ = 602;
             for (int k = 1; k <= nt; ++k) {
 
-                current_statement_begin__ = 602;
+                current_statement_begin__ = 603;
                 if (as_bool(logical_gt(get_base1(s_event,k,"s_event",1),0))) {
 
-                    current_statement_begin__ = 603;
+                    current_statement_begin__ = 604;
                     stan::model::assign(eta_event, 
                                 stan::model::cons_list(stan::model::index_min_max(pos_i_e, ((pos_i_e + get_base1(s_event,k,"s_event",1)) - 1)), stan::model::nil_index_list()), 
                                 add(stan::model::rvalue(eta_event, stan::model::cons_list(stan::model::index_min_max(pos_i_e, ((pos_i_e + get_base1(s_event,k,"s_event",1)) - 1)), stan::model::nil_index_list()), "eta_event"), get_base1(log_crude_event_rate,k,"log_crude_event_rate",1)), 
                                 "assigning variable eta_event");
                 }
-                current_statement_begin__ = 605;
+                current_statement_begin__ = 606;
                 if (as_bool(logical_gt(get_base1(s_rcens,k,"s_rcens",1),0))) {
 
-                    current_statement_begin__ = 606;
+                    current_statement_begin__ = 607;
                     stan::model::assign(eta_rcens, 
                                 stan::model::cons_list(stan::model::index_min_max(pos_i_rc, ((pos_i_rc + get_base1(s_rcens,k,"s_rcens",1)) - 1)), stan::model::nil_index_list()), 
                                 add(stan::model::rvalue(eta_rcens, stan::model::cons_list(stan::model::index_min_max(pos_i_rc, ((pos_i_rc + get_base1(s_rcens,k,"s_rcens",1)) - 1)), stan::model::nil_index_list()), "eta_rcens"), get_base1(log_crude_event_rate,k,"log_crude_event_rate",1)), 
                                 "assigning variable eta_rcens");
                 }
-                current_statement_begin__ = 608;
-                stan::math::assign(pos_i_e, (pos_i_e + get_base1(s_event,k,"s_event",1)));
                 current_statement_begin__ = 609;
+                stan::math::assign(pos_i_e, (pos_i_e + get_base1(s_event,k,"s_event",1)));
+                current_statement_begin__ = 610;
                 stan::math::assign(pos_i_rc, (pos_i_rc + get_base1(s_rcens,k,"s_rcens",1)));
             }
-            current_statement_begin__ = 614;
-            stan::math::assign(pos_i_e, 1);
             current_statement_begin__ = 615;
-            stan::math::assign(pos_i_rc, 1);
+            stan::math::assign(pos_i_e, 1);
             current_statement_begin__ = 616;
-            stan::math::assign(pos_coefs, 1);
+            stan::math::assign(pos_i_rc, 1);
             current_statement_begin__ = 617;
-            stan::math::assign(pos_spline_event, 1);
+            stan::math::assign(pos_coefs, 1);
             current_statement_begin__ = 618;
-            stan::math::assign(pos_spline_rcens, 1);
+            stan::math::assign(pos_spline_event, 1);
             current_statement_begin__ = 619;
+            stan::math::assign(pos_spline_rcens, 1);
+            current_statement_begin__ = 620;
             for (int k = 1; k <= nt; ++k) {
 
-                current_statement_begin__ = 620;
+                current_statement_begin__ = 621;
                 if (as_bool(logical_eq(get_base1(type,k,"type",1),1))) {
                     {
-                    current_statement_begin__ = 621;
+                    current_statement_begin__ = 622;
                     local_scalar_t__ shape;
                     (void) shape;  // dummy to suppress unused var warning
 
@@ -2688,28 +2691,28 @@ public:
                     stan::math::assign(shape,get_base1(coefs,pos_coefs,"coefs",1));
 
 
-                    current_statement_begin__ = 622;
-                    if (as_bool(logical_gt(get_base1(s_event,k,"s_event",1),0))) {
-                        current_statement_begin__ = 622;
-                        lp_accum__.add(weibull_log_haz(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)),segment(t_event,pos_i_e,get_base1(s_event,k,"s_event",1)),shape, pstream__));
-                    }
                     current_statement_begin__ = 623;
                     if (as_bool(logical_gt(get_base1(s_event,k,"s_event",1),0))) {
                         current_statement_begin__ = 623;
-                        lp_accum__.add(weibull_log_surv(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)),segment(t_event,pos_i_e,get_base1(s_event,k,"s_event",1)),shape, pstream__));
+                        lp_accum__.add(weibull_log_haz(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)),segment(t_event,pos_i_e,get_base1(s_event,k,"s_event",1)),shape, pstream__));
                     }
                     current_statement_begin__ = 624;
-                    if (as_bool(logical_gt(get_base1(s_rcens,k,"s_rcens",1),0))) {
+                    if (as_bool(logical_gt(get_base1(s_event,k,"s_event",1),0))) {
                         current_statement_begin__ = 624;
+                        lp_accum__.add(weibull_log_surv(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)),segment(t_event,pos_i_e,get_base1(s_event,k,"s_event",1)),shape, pstream__));
+                    }
+                    current_statement_begin__ = 625;
+                    if (as_bool(logical_gt(get_base1(s_rcens,k,"s_rcens",1),0))) {
+                        current_statement_begin__ = 625;
                         lp_accum__.add(weibull_log_surv(segment(eta_rcens,pos_i_rc,get_base1(s_rcens,k,"s_rcens",1)),segment(t_rcens,pos_i_rc,get_base1(s_rcens,k,"s_rcens",1)),shape, pstream__));
                     }
                     }
                 } else if (as_bool(logical_eq(get_base1(type,k,"type",1),4))) {
 
-                    current_statement_begin__ = 627;
+                    current_statement_begin__ = 628;
                     if (as_bool(logical_gt(get_base1(s_event,k,"s_event",1),0))) {
                         {
-                        current_statement_begin__ = 628;
+                        current_statement_begin__ = 629;
                         validate_non_negative_index("iBasis_event", "get_base1(s_event,k,\"s_event\",1)", get_base1(s_event,k,"s_event",1));
                         validate_non_negative_index("iBasis_event", "get_base1(s_vars,k,\"s_vars\",1)", get_base1(s_vars,k,"s_vars",1));
                         Eigen::Matrix<local_scalar_t__,Eigen::Dynamic,Eigen::Dynamic>  iBasis_event(static_cast<Eigen::VectorXd::Index>(get_base1(s_event,k,"s_event",1)),static_cast<Eigen::VectorXd::Index>(get_base1(s_vars,k,"s_vars",1)));
@@ -2718,7 +2721,7 @@ public:
                         stan::math::initialize(iBasis_event, DUMMY_VAR__);
                         stan::math::fill(iBasis_event,DUMMY_VAR__);
                         stan::math::assign(iBasis_event,to_matrix(segment(ibasis_event,pos_spline_event,(get_base1(s_event,k,"s_event",1) * get_base1(s_vars,k,"s_vars",1))),get_base1(s_event,k,"s_event",1),get_base1(s_vars,k,"s_vars",1)));
-                        current_statement_begin__ = 631;
+                        current_statement_begin__ = 632;
                         validate_non_negative_index("Basis_event", "get_base1(s_event,k,\"s_event\",1)", get_base1(s_event,k,"s_event",1));
                         validate_non_negative_index("Basis_event", "get_base1(s_vars,k,\"s_vars\",1)", get_base1(s_vars,k,"s_vars",1));
                         Eigen::Matrix<local_scalar_t__,Eigen::Dynamic,Eigen::Dynamic>  Basis_event(static_cast<Eigen::VectorXd::Index>(get_base1(s_event,k,"s_event",1)),static_cast<Eigen::VectorXd::Index>(get_base1(s_vars,k,"s_vars",1)));
@@ -2729,16 +2732,16 @@ public:
                         stan::math::assign(Basis_event,to_matrix(segment(basis_event,pos_spline_event,(get_base1(s_event,k,"s_event",1) * get_base1(s_vars,k,"s_vars",1))),get_base1(s_event,k,"s_event",1),get_base1(s_vars,k,"s_vars",1)));
 
 
-                        current_statement_begin__ = 634;
+                        current_statement_begin__ = 635;
                         lp_accum__.add(mspline_log_haz(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)),Basis_event,segment(coefs,pos_coefs,get_base1(s_vars,k,"s_vars",1)), pstream__));
-                        current_statement_begin__ = 636;
+                        current_statement_begin__ = 637;
                         lp_accum__.add(mspline_log_surv(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)),iBasis_event,segment(coefs,pos_coefs,get_base1(s_vars,k,"s_vars",1)), pstream__));
                         }
                     }
-                    current_statement_begin__ = 637;
+                    current_statement_begin__ = 638;
                     if (as_bool(logical_gt(get_base1(s_rcens,k,"s_rcens",1),0))) {
                         {
-                        current_statement_begin__ = 638;
+                        current_statement_begin__ = 639;
                         validate_non_negative_index("iBasis_rcens", "get_base1(s_rcens,k,\"s_rcens\",1)", get_base1(s_rcens,k,"s_rcens",1));
                         validate_non_negative_index("iBasis_rcens", "get_base1(s_vars,k,\"s_vars\",1)", get_base1(s_vars,k,"s_vars",1));
                         Eigen::Matrix<local_scalar_t__,Eigen::Dynamic,Eigen::Dynamic>  iBasis_rcens(static_cast<Eigen::VectorXd::Index>(get_base1(s_rcens,k,"s_rcens",1)),static_cast<Eigen::VectorXd::Index>(get_base1(s_vars,k,"s_vars",1)));
@@ -2749,30 +2752,30 @@ public:
                         stan::math::assign(iBasis_rcens,to_matrix(segment(ibasis_rcens,pos_spline_rcens,(get_base1(s_rcens,k,"s_rcens",1) * get_base1(s_vars,k,"s_vars",1))),get_base1(s_rcens,k,"s_rcens",1),get_base1(s_vars,k,"s_vars",1)));
 
 
-                        current_statement_begin__ = 641;
+                        current_statement_begin__ = 642;
                         lp_accum__.add(mspline_log_surv(segment(eta_rcens,pos_i_rc,get_base1(s_rcens,k,"s_rcens",1)),iBasis_rcens,segment(coefs,pos_coefs,get_base1(s_vars,k,"s_vars",1)), pstream__));
                         }
                     }
                 } else if (as_bool(logical_eq(get_base1(type,k,"type",1),5))) {
 
-                    current_statement_begin__ = 645;
-                    if (as_bool(logical_gt(get_base1(s_event,k,"s_event",1),0))) {
-                        current_statement_begin__ = 645;
-                        lp_accum__.add(exponential_log_haz(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)), pstream__));
-                    }
                     current_statement_begin__ = 646;
                     if (as_bool(logical_gt(get_base1(s_event,k,"s_event",1),0))) {
                         current_statement_begin__ = 646;
-                        lp_accum__.add(exponential_log_surv(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)),segment(t_event,pos_i_e,get_base1(s_event,k,"s_event",1)), pstream__));
+                        lp_accum__.add(exponential_log_haz(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)), pstream__));
                     }
                     current_statement_begin__ = 647;
-                    if (as_bool(logical_gt(get_base1(s_rcens,k,"s_rcens",1),0))) {
+                    if (as_bool(logical_gt(get_base1(s_event,k,"s_event",1),0))) {
                         current_statement_begin__ = 647;
+                        lp_accum__.add(exponential_log_surv(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)),segment(t_event,pos_i_e,get_base1(s_event,k,"s_event",1)), pstream__));
+                    }
+                    current_statement_begin__ = 648;
+                    if (as_bool(logical_gt(get_base1(s_rcens,k,"s_rcens",1),0))) {
+                        current_statement_begin__ = 648;
                         lp_accum__.add(exponential_log_surv(segment(eta_rcens,pos_i_rc,get_base1(s_rcens,k,"s_rcens",1)),segment(t_rcens,pos_i_rc,get_base1(s_rcens,k,"s_rcens",1)), pstream__));
                     }
                 } else if (as_bool(logical_eq(get_base1(type,k,"type",1),6))) {
                     {
-                    current_statement_begin__ = 650;
+                    current_statement_begin__ = 651;
                     local_scalar_t__ scale;
                     (void) scale;  // dummy to suppress unused var warning
 
@@ -2781,51 +2784,51 @@ public:
                     stan::math::assign(scale,get_base1(coefs,pos_coefs,"coefs",1));
 
 
-                    current_statement_begin__ = 651;
-                    if (as_bool(logical_gt(get_base1(s_event,k,"s_event",1),0))) {
-                        current_statement_begin__ = 651;
-                        lp_accum__.add(gompertz_log_haz(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)),segment(t_event,pos_i_e,get_base1(s_event,k,"s_event",1)),scale, pstream__));
-                    }
                     current_statement_begin__ = 652;
                     if (as_bool(logical_gt(get_base1(s_event,k,"s_event",1),0))) {
                         current_statement_begin__ = 652;
-                        lp_accum__.add(gompertz_log_surv(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)),segment(t_event,pos_i_e,get_base1(s_event,k,"s_event",1)),scale, pstream__));
+                        lp_accum__.add(gompertz_log_haz(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)),segment(t_event,pos_i_e,get_base1(s_event,k,"s_event",1)),scale, pstream__));
                     }
                     current_statement_begin__ = 653;
-                    if (as_bool(logical_gt(get_base1(s_rcens,k,"s_rcens",1),0))) {
+                    if (as_bool(logical_gt(get_base1(s_event,k,"s_event",1),0))) {
                         current_statement_begin__ = 653;
-                        lp_accum__.add(gompertz_log_surv(segment(eta_rcens,pos_i_rc,get_base1(s_rcens,k,"s_rcens",1)),segment(t_rcens,pos_i_rc,get_base1(s_rcens,k,"s_rcens",1)),scale, pstream__));
+                        lp_accum__.add(gompertz_log_surv(segment(eta_event,pos_i_e,get_base1(s_event,k,"s_event",1)),segment(t_event,pos_i_e,get_base1(s_event,k,"s_event",1)),scale, pstream__));
                     }
                     current_statement_begin__ = 654;
+                    if (as_bool(logical_gt(get_base1(s_rcens,k,"s_rcens",1),0))) {
+                        current_statement_begin__ = 654;
+                        lp_accum__.add(gompertz_log_surv(segment(eta_rcens,pos_i_rc,get_base1(s_rcens,k,"s_rcens",1)),segment(t_rcens,pos_i_rc,get_base1(s_rcens,k,"s_rcens",1)),scale, pstream__));
+                    }
+                    current_statement_begin__ = 655;
                     stan::math::assign(pos_coefs, (pos_coefs + 1));
                     }
                 } else {
 
-                    current_statement_begin__ = 657;
+                    current_statement_begin__ = 658;
                     std::stringstream errmsg_stream__;
                     errmsg_stream__ << "Bug found: invalid baseline hazard (without quadrature).";
                     throw std::domain_error(errmsg_stream__.str());
                 }
-                current_statement_begin__ = 659;
-                stan::math::assign(pos_i_e, (pos_i_e + get_base1(s_event,k,"s_event",1)));
                 current_statement_begin__ = 660;
-                stan::math::assign(pos_i_rc, (pos_i_rc + get_base1(s_rcens,k,"s_rcens",1)));
+                stan::math::assign(pos_i_e, (pos_i_e + get_base1(s_event,k,"s_event",1)));
                 current_statement_begin__ = 661;
-                stan::math::assign(pos_coefs, (pos_coefs + get_base1(s_vars,k,"s_vars",1)));
+                stan::math::assign(pos_i_rc, (pos_i_rc + get_base1(s_rcens,k,"s_rcens",1)));
                 current_statement_begin__ = 662;
-                stan::math::assign(pos_spline_event, (pos_spline_event + (get_base1(s_event,k,"s_event",1) * get_base1(s_vars,k,"s_vars",1))));
+                stan::math::assign(pos_coefs, (pos_coefs + get_base1(s_vars,k,"s_vars",1)));
                 current_statement_begin__ = 663;
+                stan::math::assign(pos_spline_event, (pos_spline_event + (get_base1(s_event,k,"s_event",1) * get_base1(s_vars,k,"s_vars",1))));
+                current_statement_begin__ = 664;
                 stan::math::assign(pos_spline_rcens, (pos_spline_rcens + (get_base1(s_rcens,k,"s_rcens",1) * get_base1(s_vars,k,"s_vars",1))));
             }
-            current_statement_begin__ = 669;
-            stan::math::assign(pos, 1);
             current_statement_begin__ = 670;
+            stan::math::assign(pos, 1);
+            current_statement_begin__ = 671;
             for (int k = 1; k <= nt; ++k) {
 
-                current_statement_begin__ = 671;
+                current_statement_begin__ = 672;
                 if (as_bool(logical_gt(get_base1(s_K,k,"s_K",1),0))) {
                     {
-                    current_statement_begin__ = 672;
+                    current_statement_begin__ = 673;
                     local_scalar_t__ dummy;
                     (void) dummy;  // dummy to suppress unused var warning
 
@@ -2836,18 +2839,18 @@ public:
 
                     }
                 }
-                current_statement_begin__ = 674;
+                current_statement_begin__ = 675;
                 stan::math::assign(pos, (pos + get_base1(s_K,k,"s_K",1)));
             }
-            current_statement_begin__ = 678;
-            stan::math::assign(pos_g, 1);
             current_statement_begin__ = 679;
+            stan::math::assign(pos_g, 1);
+            current_statement_begin__ = 680;
             for (int k = 1; k <= nt; ++k) {
 
-                current_statement_begin__ = 680;
+                current_statement_begin__ = 681;
                 if (as_bool(logical_eq(get_base1(has_intercept,k,"has_intercept",1),1))) {
                     {
-                    current_statement_begin__ = 681;
+                    current_statement_begin__ = 682;
                     local_scalar_t__ dummy;
                     (void) dummy;  // dummy to suppress unused var warning
 
@@ -2856,20 +2859,20 @@ public:
                     stan::math::assign(dummy,gamma_lp(get_base1(gamma,pos_g,"gamma",1),get_base1(prior_dist_for_intercept,k,"prior_dist_for_intercept",1),get_base1(prior_mean_for_intercept,k,"prior_mean_for_intercept",1),get_base1(prior_scale_for_intercept,k,"prior_scale_for_intercept",1),get_base1(prior_df_for_intercept,k,"prior_df_for_intercept",1), lp__, lp_accum__, pstream__));
 
 
-                    current_statement_begin__ = 683;
+                    current_statement_begin__ = 684;
                     stan::math::assign(pos_g, (pos_g + 1));
                     }
                 }
             }
-            current_statement_begin__ = 688;
-            stan::math::assign(pos, 1);
             current_statement_begin__ = 689;
+            stan::math::assign(pos, 1);
+            current_statement_begin__ = 690;
             for (int k = 1; k <= nt; ++k) {
 
-                current_statement_begin__ = 690;
+                current_statement_begin__ = 691;
                 if (as_bool(logical_gt(get_base1(s_vars,k,"s_vars",1),0))) {
                     {
-                    current_statement_begin__ = 691;
+                    current_statement_begin__ = 692;
                     local_scalar_t__ dummy;
                     (void) dummy;  // dummy to suppress unused var warning
 
@@ -2880,8 +2883,9 @@ public:
 
                     }
                 }
-                current_statement_begin__ = 692;
+                current_statement_begin__ = 693;
                 stan::math::assign(pos, (pos + get_base1(s_vars,k,"s_vars",1)));
+            }
             }
             }
 
@@ -3081,37 +3085,37 @@ public:
             }
             if (!include_gqs__) return;
             // declare and define generated quantities
-            current_statement_begin__ = 701;
+            current_statement_begin__ = 702;
             validate_non_negative_index("alpha", "N_has_intercept", N_has_intercept);
             vector<local_scalar_t__> alpha(N_has_intercept);
             stan::math::initialize(alpha, DUMMY_VAR__);
             stan::math::fill(alpha,DUMMY_VAR__);
-            current_statement_begin__ = 702;
+            current_statement_begin__ = 703;
             validate_non_negative_index("aux", "Nvars", Nvars);
             Eigen::Matrix<local_scalar_t__,Eigen::Dynamic,1>  aux(static_cast<Eigen::VectorXd::Index>(Nvars));
             (void) aux;  // dummy to suppress unused var warning
 
             stan::math::initialize(aux, DUMMY_VAR__);
             stan::math::fill(aux,DUMMY_VAR__);
-            current_statement_begin__ = 704;
+            current_statement_begin__ = 705;
             int pos_b(0);
             (void) pos_b;  // dummy to suppress unused var warning
 
             stan::math::fill(pos_b, std::numeric_limits<int>::min());
             stan::math::assign(pos_b,1);
-            current_statement_begin__ = 705;
+            current_statement_begin__ = 706;
             int pos_vars(0);
             (void) pos_vars;  // dummy to suppress unused var warning
 
             stan::math::fill(pos_vars, std::numeric_limits<int>::min());
             stan::math::assign(pos_vars,1);
-            current_statement_begin__ = 706;
+            current_statement_begin__ = 707;
             int pos_g(0);
             (void) pos_g;  // dummy to suppress unused var warning
 
             stan::math::fill(pos_g, std::numeric_limits<int>::min());
             stan::math::assign(pos_g,1);
-            current_statement_begin__ = 707;
+            current_statement_begin__ = 708;
             int pos_int(0);
             (void) pos_int;  // dummy to suppress unused var warning
 
@@ -3119,47 +3123,47 @@ public:
             stan::math::assign(pos_int,1);
 
 
-            current_statement_begin__ = 708;
+            current_statement_begin__ = 709;
             for (int k = 1; k <= nt; ++k) {
 
-                current_statement_begin__ = 709;
+                current_statement_begin__ = 710;
                 if (as_bool(logical_eq(get_base1(type,k,"type",1),4))) {
 
-                    current_statement_begin__ = 710;
+                    current_statement_begin__ = 711;
                     stan::model::assign(aux, 
                                 stan::model::cons_list(stan::model::index_min_max(pos_vars, ((pos_vars + get_base1(s_vars,k,"s_vars",1)) - 1)), stan::model::nil_index_list()), 
                                 multiply(segment(coefs,pos_vars,get_base1(s_vars,k,"s_vars",1)),stan::math::exp((get_base1(log_crude_event_rate,k,"log_crude_event_rate",1) - dot_product(segment(x_bar,pos_b,get_base1(s_K,k,"s_K",1)),segment(beta,pos_b,get_base1(s_K,k,"s_K",1)))))), 
                                 "assigning variable aux");
                 } else {
 
-                    current_statement_begin__ = 713;
+                    current_statement_begin__ = 714;
                     stan::model::assign(aux, 
                                 stan::model::cons_list(stan::model::index_uni(pos_vars), stan::model::nil_index_list()), 
                                 get_base1(coefs,pos_vars,"coefs",1), 
                                 "assigning variable aux");
-                    current_statement_begin__ = 714;
+                    current_statement_begin__ = 715;
                     stan::model::assign(alpha, 
                                 stan::model::cons_list(stan::model::index_uni(pos_int), stan::model::nil_index_list()), 
                                 ((get_base1(log_crude_event_rate,k,"log_crude_event_rate",1) - dot_product(segment(x_bar,pos_b,get_base1(s_K,k,"s_K",1)),segment(beta,pos_b,get_base1(s_K,k,"s_K",1)))) + get_base1(gamma,pos_g,"gamma",1)), 
                                 "assigning variable alpha");
-                    current_statement_begin__ = 715;
-                    stan::math::assign(pos_g, (pos_g + 1));
                     current_statement_begin__ = 716;
+                    stan::math::assign(pos_g, (pos_g + 1));
+                    current_statement_begin__ = 717;
                     stan::math::assign(pos_int, (pos_int + 1));
                 }
-                current_statement_begin__ = 718;
-                stan::math::assign(pos_vars, (pos_vars + get_base1(s_vars,k,"s_vars",1)));
                 current_statement_begin__ = 719;
+                stan::math::assign(pos_vars, (pos_vars + get_base1(s_vars,k,"s_vars",1)));
+                current_statement_begin__ = 720;
                 stan::math::assign(pos_b, (pos_b + get_base1(s_K,k,"s_K",1)));
             }
 
             // validate generated quantities
-            current_statement_begin__ = 701;
             current_statement_begin__ = 702;
-            current_statement_begin__ = 704;
+            current_statement_begin__ = 703;
             current_statement_begin__ = 705;
             current_statement_begin__ = 706;
             current_statement_begin__ = 707;
+            current_statement_begin__ = 708;
 
             // write generated quantities
             for (int k_0__ = 0; k_0__ < N_has_intercept; ++k_0__) {

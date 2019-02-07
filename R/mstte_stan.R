@@ -402,15 +402,15 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
   nicens = aau(nicens)
   ndelay = aau(ndelay)
 
-  posevent = cumsum(nevent)
-  posrcens = cumsum(nrcens)
-  poslcens = cumsum(nlcens)
-  posnices = cumsum(nicens)
-  posdelay = cumsum(ndelay)
+  # posevent = cumsum(nevent)
+  # posrcens = cumsum(nrcens)
+  # poslcens = cumsum(nlcens)
+  # posnices = cumsum(nicens)
+  # posdelay = cumsum(ndelay)
 
-  posbasis_event = aau(lapply(basis_event, function(b) nrow(b)))
-  posibasis_event = aau(lapply(ibasis_event, function(b) nrow(b)))
-  posibasis_rcens = aau(lapply(ibasis_rcens, function(b) nrow(b)))
+  # posbasis_event = aau(lapply(basis_event, function(b) nrow(b)))
+  # posibasis_event = aau(lapply(ibasis_event, function(b) nrow(b)))
+  # posibasis_rcens = aau(lapply(ibasis_rcens, function(b) nrow(b)))
 
   standata <- nlist(
     nt    = nt,
@@ -451,7 +451,6 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
     Nibasis_event = length(aau(ibasis_event)),
     Nibasis_rcens = length(aau(ibasis_rcens))
   )
-
   #----- priors and hyperparameters
 
   # valid priors

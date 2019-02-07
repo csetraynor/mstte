@@ -375,7 +375,7 @@ functions {
 
 data {
   int<lower=1> nt;         // number of transitions
-  int<lower=1> s_K[nt];      // size of fixed effects for each transition
+  int<lower=0> s_K[nt];      // size of fixed effects for each transition
   int<lower=0> nK;         // total number of fixed effects
   int<lower=0> s_vars[nt];  // basis for each transition
   int<lower=0> Nvars;      // total number of vars for basis
@@ -537,6 +537,7 @@ model {
   // linear predictor
   vector[Nrcens] eta_rcens;  // time of right censoring
   vector[Nevent] eta_event;  // time of events
+ {
 
   // define iterators
     int pos;
@@ -691,7 +692,7 @@ model {
        real dummy = basehaz_lp(segment(z_coefs, pos, s_vars[k]), prior_dist_for_aux[k], segment(prior_df_for_aux, pos, s_vars[k])); }
   pos += s_vars[k];
   }
-
+ }
 }
 
 generated quantities {

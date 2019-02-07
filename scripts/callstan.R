@@ -1,6 +1,7 @@
+
 library(rstanarm)
 library(rstan)
-options(mc.cores = 4)
+options(mc.cores = 2)
 rstan_options(auto_write = TRUE)
 
 library(mstate)
@@ -15,13 +16,15 @@ dimnames(tmat.mst) <- list(c("transplant","relapse","death"),
 
 ebmt.mstate <- msprep(time=c(NA,"rel","srv"), status=c(NA,"relstat","srvstat"), data=ebmt1, trans=tmat.mst , keep = c("age", "score"))
 
+survreg(Surv(time=time,event=status)~strata(trans) * age + strata(trans) * score, data = ebmt.mstate, dist = "wei")
+
 formula = lapply(1:3, function (x)
-  as.formula(Surv(time=time,event=status)~age+score) )
+  as.formula(Surv(time=time,event=status)~score) )
 formula[[1]] =  as.formula(Surv(time=time,event=status)~score)
 formula[[2]] =  as.formula(Surv(time=time,event=status)~age)
 
-prior = lapply(1:3, function(x)
-  rstanarm::student_t() )
+# prior = lapply(1:3, function(x)
+#   rstanarm::student_t() )
 
 prior_intercept = lapply(1:3, function(x)
   rstanarm::normal() )
@@ -43,9 +46,12 @@ stanfit <- mstte_stan(formula = formula,
                        rstanarm::normal() ),
                      prior_intercept = prior_intercept,
                      prior_aux       = prior_aux,
-                     iter = 1,
-                     chains = 2,
-                     control = list(adapt_delta = 0.8)
+                     iter = 1000,
+                     chains = 4,
+                     control = list(adapt_delta = 0.95)
 )
+
+coxph(Surv(time=time,event=status)~age+score+strata(trans), data = ebmt.mstate)
+
 
 stanfit
