@@ -461,20 +461,6 @@ data {
   vector<lower=0>[Nvars] prior_df_for_aux;
 }
 
-transformed data {
-
-  /* Not implemented
-  int<lower=0> s_hs[nt] = get_nvars_for_hs(prior_dist[nt]);
-
-  int<lower=0> nhs = 0;
-
-  for(i in 1:nt){
-    nhs = nhs + s_hsi;
-  }
-  */
-
-}
-
 parameters {
   // log hazard ratios
   vector[nK] z_beta;
@@ -573,6 +559,9 @@ model {
           s_rcens[k], s_K[k] );
           eta_rcens[pos_i_rc:(pos_i_rc + s_rcens[k] - 1)] = X_rcens * segment(beta, pos_b, s_K[k]);
       }
+    } else {
+        if (s_event[k] > 0)  eta_event[pos_i_e:(pos_i_e + s_event[k] - 1) ] = rep_vector(0.0, s_event[k]);
+        if (s_rcens[k] > 0) eta_rcens[pos_i_rc:(pos_i_rc + s_rcens[k] - 1)] = rep_vector(0.0, s_rcens[k]);
     }
     pos_e += s_event[k] * s_K[k];
     pos_i_e += s_event[k];
@@ -580,8 +569,6 @@ model {
     pos_i_rc += s_rcens[k];
     pos_b += s_K[k];
   }
-
-
   // add intercept
   pos_i_e = 1;
   pos_i_rc = 1;
@@ -609,8 +596,6 @@ model {
     pos_i_e += s_event[k];
     pos_i_rc += s_rcens[k];
     }
-
-
   // evaluate log hazard and log survival
   pos_i_e = 1;
   pos_i_rc = 1;
@@ -663,9 +648,7 @@ model {
   pos_spline_event += (s_event[k] * s_vars[k]);
   pos_spline_rcens +=  (s_rcens[k] * s_vars[k]);
   }
-
   //-------- log priors
-
   // log priors for coefficients
   pos = 1;
   for (k in 1:nt){
@@ -674,7 +657,6 @@ model {
     }
     pos += s_K[k];
   }
-
   // log prior for intercept
   pos_g = 1;
   for(k in 1:nt){
