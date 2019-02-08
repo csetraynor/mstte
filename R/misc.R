@@ -83,7 +83,7 @@ warning2 <- function(...) warning(..., immediate. = TRUE, call. = FALSE)
 
 # Shorthand for suppress warnings
 SW <- function(expr) base::suppressWarnings(expr)
-
+SM <- function(expr) base::suppressMessages(exp)
 # Check if an object is NULL
 is_null <- function(x) {
   is.null(x) || ifelse(is.vector(x), all(sapply(x, is.null)), FALSE)
@@ -115,7 +115,7 @@ safe_deparse <- function(expr) deparse(expr, 500L)
 `%ORifINF%` <- function(a, b) {
   if (a == Inf) b else a
 }
-
+`%!in%` <- function(x,y)!('%in%'(x,y))
 
 # Return the list with summary information about the baseline hazard
 #
@@ -273,6 +273,11 @@ used.variational <- function(x) {
 
 
 # ------------- Helpers ---------------#
+# Left join NA to 0 for sparse matrix
+full_join_NA <- function(x, y, ...) {
+  dplyr::full_join(x = x, y = y, by = ...) %>%
+    dplyr::mutate_each(funs(replace(., which(is.na(.)), 0)))
+}
 # Combine pars and regex_pars
 #
 # @param x stanreg object
@@ -295,6 +300,64 @@ b_names <- function(x, ...) {
   grep("^b\\[", x, ...)
 }
 
+# Extract parameters from stanmat and return as a list
+#
+# @param object A stanmvreg or stansurv object
+# @param stanmat A matrix of posterior draws, may be provided if the desired
+#   stanmat is only a subset of the draws from as.matrix(object$stanfit)
+# @return A named list
+extract_pars <- function(object, ...) {
+  UseMethod("extract_pars")
+}
+
+extract_pars.stanmstte <- function(object, stanmat = NULL, means = FALSE) {
+  validate_stanmstte_object(object)
+  if (is.null(stanmat))
+    stanmat <- as.matrix(object$stanfit)
+  if (means)
+    stanmat <- t(colMeans(stanmat)) # return posterior means
+  nms_beta <- lapply(object$x, function(x) colnames(x) )
+  nms_beta <- uapply(seq_len(object$n_transitions), function(i)
+    append_trans(nms_beta[[i]], i, object$transition_labels[i]) )
+  nms_tde  <- get_smooth_name(object$s_cpts, type = "smooth_coefs")
+  nms_smth <- get_smooth_name(object$s_cpts, type = "smooth_sd")
+  nms_int  <- lapply(object$basehaz, function(b) get_int_name_basehaz(b) )
+  nms_int <- uapply(seq_len(object$n_transitions), function(i)
+    append_trans(nms_int[[i]], i, object$transition_labels[i]) )
+  nms_aux  <- lapply(object$basehaz, function(b)  get_aux_name_basehaz(b) )
+  nms_aux <- uapply(seq_len(object$n_transitions), function(i)
+    append_trans(nms_aux[[i]], i, object$transition_labels[i]) )
+  alpha    <- stanmat[, nms_int,  drop = FALSE]
+  beta     <- stanmat[, nms_beta, drop = FALSE]
+  beta_tde <- stanmat[, nms_tde,  drop = FALSE]
+  aux      <- stanmat[, nms_aux,  drop = FALSE]
+  smooth   <- stanmat[, nms_smth, drop = FALSE]
+  nlist(alpha, beta, beta_tde, aux, smooth, stanmat)
+}
+
+# Return the name of the tde spline coefs or smoothing parameters.
+#
+# @param x The predictor matrix for the time-dependent effects, with column names.
+# @param type The type of information about the smoothing parameters to return.
+# @return A character or numeric vector, depending on 'type'.
+get_smooth_name <- function(x, type = "smooth_coefs") {
+
+  if (is.null(x) || !ncol(x))
+    return(NULL)
+
+  nms <- gsub(":bs\\(times__.*\\)[0-9]*$", "", colnames(x))
+  tally   <- table(nms)
+  indices <- uapply(tally, seq_len)
+  suffix  <- paste0(":tde-spline-coef", indices)
+
+  switch(type,
+         smooth_coefs = paste0(nms, suffix),
+         smooth_sd    = paste0("smooth_sd[", unique(nms), "]"),
+         smooth_map   = rep(seq_along(tally), tally),
+         smooth_vars  = unique(nms),
+         stop2("Bug found: invalid input to 'type' argument."))
+}
+
 #Compute point estimates and standard errors from pointwise vectors
 #
 # @param x A matrix.
@@ -311,12 +374,20 @@ table_of_estimates <- function(x) {
 }
 
 append_trans <- function(x, i, labs){
+  if(is.null(x)) return(NULL)
   if(is.null(labs)){
     paste0(x," trans(",i,")" )
   } else {
     paste0(x," trans(",labs,")" )
   }
 }
+
+# Append a string (prefix) to the column names of a matrix or array
+append_prefix_to_colnames <- function(x, str) {
+  if (ncol(x)) set_colnames(x, paste0(str, colnames(x))) else x
+}
+
+set_colnames <- function(x, names) { colnames(x) <- names; x }
 
 append_title <- function(object){
   if(is.null(object$transition_labels)){
@@ -451,9 +522,69 @@ validate_stanmstte_object <- function(x, call. = FALSE) {
     stop("Object is not a stanmstee object.", call. = call.)
 }
 
-
-
-
+# Validate newdataLong and newdataEvent arguments
+#
+# @param object A stanmvreg object
+# @param newdataLong A data frame, or a list of data frames
+# @param newdataEvent A data frame
+# @param duplicate_ok A logical. If FALSE then only one row per individual is
+#   allowed in the newdataEvent data frame
+# @param response A logical specifying whether the longitudinal response
+#   variable must be included in the new data frame
+# @return A list of validated data frames
+validate_newdatas <- function(object, newdataLong = NULL, newdataEvent = NULL,
+                              duplicate_ok = FALSE, response = TRUE) {
+  validate_stanmstte_object(object)
+  id_var <- object$id_var
+  newdatas <- list()
+  if (!is.null(newdataLong)) {
+    if (!is(newdataLong, "list"))
+      newdataLong <- rep(list(newdataLong), get_M(object))
+    dfcheck <- sapply(newdataLong, is.data.frame)
+    if (!all(dfcheck))
+      stop("'newdataLong' must be a data frame or list of data frames.", call. = FALSE)
+    nacheck <- sapply(seq_along(newdataLong), function(m) {
+      if (response) { # newdataLong needs the reponse variable
+        fmL <- formula(object, m = m)
+      } else { # newdataLong only needs the covariates
+        fmL <- formula(object, m = m)[c(1,3)]
+      }
+      all(!is.na(get_all_vars(fmL, newdataLong[[m]])))
+    })
+    if (!all(nacheck))
+      stop("'newdataLong' cannot contain NAs.", call. = FALSE)
+    newdatas <- c(newdatas, newdataLong)
+  }
+  if (!is.null(newdataEvent)) {
+    if (!is.data.frame(newdataEvent))
+      stop("'newdataEvent' must be a data frame.", call. = FALSE)
+    if (response) { # newdataEvent needs the reponse variable
+      fmE <- formula(object, m = "Event")
+    } else { # newdataEvent only needs the covariates
+      fmE <- formula(object, m = "Event")[c(1,3)]
+    }
+    dat <- get_all_vars(fmE, newdataEvent)
+    dat[[id_var]] <- newdataEvent[[id_var]] # include ID variable in event data
+    if (any(is.na(dat)))
+      stop("'newdataEvent' cannot contain NAs.", call. = FALSE)
+    if (!duplicate_ok && any(duplicated(newdataEvent[[id_var]])))
+      stop("'newdataEvent' should only contain one row per individual, since ",
+           "time varying covariates are not allowed in the prediction data.")
+    newdatas <- c(newdatas, list(Event = newdataEvent))
+  }
+  if (length(newdatas)) {
+    idvar_check <- sapply(newdatas, function(x) id_var %in% colnames(x))
+    if (!all(idvar_check))
+      STOP_no_var(id_var)
+    ids <- lapply(newdatas, function(x) unique(x[[id_var]]))
+    sorted_ids <- lapply(ids, sort)
+    if (!length(unique(sorted_ids)) == 1L)
+      stop("The same subject ids should appear in each new data frame.")
+    if (!length(unique(ids)) == 1L)
+      stop("The subject ids should be ordered the same in each new data frame.")
+    return(newdatas)
+  } else return(NULL)
+}
 
 # ------- Helpers data ------------------ #
 # Parse the model formula
@@ -634,6 +765,13 @@ make_model_frame <- function(formula, data, check_constant = TRUE) {
   nlist(mf, mt)
 }
 
+# Return the number of longitudinal submodels
+#
+# @param object A stanmvreg object
+get_T <- function(object) {
+  validate_stanmvreg_object(object)
+  return(object$n_transitions)
+}
 
 # Return the response vector (time) for estimation
 #
@@ -790,6 +928,23 @@ get_ok_basehaz_ops <- function(basehaz_name) {
          piecewise = c("df", "knots"),
          ms        = c("df", "knots"),
          NA)
+}
+
+# Check if a fitted model (stanreg object) has weights
+#
+# @param x stanreg object
+# @return Logical. Only TRUE if x$weights has positive length and the elements
+#   of x$weights are not all the same.
+#
+model_has_weights <- function(x) {
+  wts <- x[["weights"]]
+  if (!length(wts)) {
+    FALSE
+  } else if (all(wts == wts[1])) {
+    FALSE
+  } else {
+    TRUE
+  }
 }
 
 
@@ -1029,7 +1184,7 @@ make_model_data <- function(formula, data) {
 #
 # @param basehaz A list with info about the baseline hazard; see 'handle_basehaz'.
 # @return A Logical.
-has_intercept <- function(basehaz) {
+has_intercept <- function(basehaz, ind = NULL) {
   nm <- get_basehaz_name(basehaz)
   (nm %in% c("exp", "weibull", "gompertz"))
 }

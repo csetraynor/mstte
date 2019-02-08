@@ -3,7 +3,7 @@ library(mstate)
 library(dplyr)
 roxygen2::roxygenise(clean = TRUE)
 
-ae = readxl::read_xlsx("~/mstte-data/Data for transmodel.xlsx")
+ae = readxl::read_xlsx("~/rfactory/mstte-data/Data for transmodel.xlsx")
 ae$Time2 = ae$Time1 + ae$Time2
 ae$Time3 = ae$Time2 + ae$Time3
 ae$Time4 = ae$Time4 + ae$Time3

@@ -1,0 +1,711 @@
+#' Information criteria and cross-validation
+#'
+#' @description For models fit using MCMC, compute approximate leave-one-out
+#'   cross-validation (LOO, LOOIC) or, less preferably, the Widely Applicable
+#'   Information Criterion (WAIC) using the \pkg{\link[=loo-package]{loo}}
+#'   package. Functions for \eqn{K}-fold cross-validation, model comparison,
+#'   and model weighting/averaging are also provided. \strong{Note}:
+#'   these functions are not guaranteed to work properly unless the \code{data}
+#'   argument was specified when the model was fit. Also, as of \pkg{loo}
+#'   version \code{2.0.0} the default number of cores is now only 1,  but we
+#'   recommend using as many (or close to as many) cores as possible by setting
+#'   the \code{cores} argument or using \code{options(mc.cores = VALUE)} to set
+#'   it for an entire session.
+#'
+#' @aliases loo waic
+#'
+#' @export
+#'
+#' @param x For \code{loo}, \code{waic}, and \code{kfold} methods, a fitted
+#'   model object returned by one of the rstanarm modeling functions. See
+#'   \link{stanreg-objects}.
+#'
+#'   For \code{loo_model_weights}, \code{x} should be a "stanreg_list"
+#'   object, which is a list of fitted model objects created by
+#'   \code{\link{stanreg_list}}.
+#'
+#' @param ... For \code{compare_models}, \code{...} should contain two or more
+#'   objects returned by the \code{loo}, \code{kfold}, or \code{waic} method
+#'   (see the \strong{Examples} section, below).
+#'
+#'   For \code{loo_model_weights}, \code{...} should contain arguments
+#'   (e.g. \code{method}) to pass to the default
+#'   \code{\link[loo]{loo_model_weights}} method from the \pkg{loo} package.
+#'
+#' @param cores,save_psis Passed to \code{\link[loo]{loo}}.
+#' @param k_threshold Threshold for flagging estimates of the Pareto shape
+#'   parameters \eqn{k} estimated by \code{loo}. See the \emph{How to proceed
+#'   when \code{loo} gives warnings} section, below, for details.
+#'
+#' @return The structure of the objects returned by \code{loo} and \code{waic}
+#'   methods are documented in detail in the \strong{Value} section in
+#'   \code{\link[loo]{loo}} and \code{\link[loo]{waic}} (from the \pkg{loo}
+#'   package).
+#'
+#' @section Approximate LOO CV: The \code{loo} method for stanreg objects
+#'   provides an interface to the \pkg{\link[=loo-package]{loo}} package for
+#'   approximate leave-one-out cross-validation (LOO). The LOO Information
+#'   Criterion (LOOIC) has the same purpose as the Akaike Information Criterion
+#'   (AIC) that is used by frequentists. Both are intended to estimate the
+#'   expected log predictive density (ELPD) for a new dataset. However, the AIC
+#'   ignores priors and assumes that the posterior distribution is multivariate
+#'   normal, whereas the functions from the \pkg{loo} package do not make this
+#'   distributional assumption and integrate over uncertainty in the parameters.
+#'   This only assumes that any one observation can be omitted without having a
+#'   major effect on the posterior distribution, which can be judged using the
+#'   diagnostic plot provided by the \code{\link[loo]{plot.loo}} method and the
+#'   warnings provided by the \code{\link[loo]{print.loo}} method (see the
+#'   \emph{How to Use the rstanarm Package} vignette for an example of this
+#'   process).
+#'
+#'   \subsection{How to proceed when \code{loo} gives warnings (k_threshold)}{
+#'   The \code{k_threshold} argument to the \code{loo} method for \pkg{rstanarm}
+#'   models is provided as a possible remedy when the diagnostics reveal
+#'   problems stemming from the posterior's sensitivity to particular
+#'   observations. Warnings about Pareto \eqn{k} estimates indicate observations
+#'   for which the approximation to LOO is problematic (this is described in
+#'   detail in Vehtari, Gelman, and Gabry (2017) and the
+#'   \pkg{\link[=loo-package]{loo}} package documentation). The
+#'   \code{k_threshold} argument can be used to set the \eqn{k} value above
+#'   which an observation is flagged. If \code{k_threshold} is not \code{NULL}
+#'   and there are \eqn{J} observations with \eqn{k} estimates above
+#'   \code{k_threshold} then when \code{loo} is called it will refit the
+#'   original model \eqn{J} times, each time leaving out one of the \eqn{J}
+#'   problematic observations. The pointwise contributions of these observations
+#'   to the total ELPD are then computed directly and substituted for the
+#'   previous estimates from these \eqn{J} observations that are stored in the
+#'   object created by \code{loo}.
+#'
+#'   \strong{Note}: in the warning messages issued by \code{loo} about large
+#'   Pareto \eqn{k} estimates we recommend setting \code{k_threshold} to at
+#'   least \eqn{0.7}. There is a theoretical reason, explained in Vehtari,
+#'   Gelman, and Gabry (2017), for setting the threshold to the stricter value
+#'   of \eqn{0.5}, but in practice they find that errors in the LOO
+#'   approximation start to increase non-negligibly when \eqn{k > 0.7}.
+#'   }
+#'
+#' @seealso
+#' \itemize{
+#'   \item The new \href{http://mc-stan.org/loo/articles/}{\pkg{loo} package vignettes}
+#'   and various \href{http://mc-stan.org/rstanarm/articles/}{\pkg{rstanarm} vignettes}
+#'   for more examples using \code{loo} and related functions with \pkg{rstanarm} models.
+#'   \item \code{\link[loo]{pareto-k-diagnostic}} in the \pkg{loo} package for
+#'   more on Pareto \eqn{k} diagnostics.
+#'   \item \code{\link{log_lik.stanreg}} to directly access the pointwise
+#'   log-likelihood matrix.
+#' }
+#'
+#' @examples
+#' \donttest{
+#' fit1 <- stan_glm(mpg ~ wt, data = mtcars)
+#' fit2 <- stan_glm(mpg ~ wt + cyl, data = mtcars)
+#'
+#' # compare on LOOIC
+#' # (for bigger models use as many cores as possible)
+#' loo1 <- loo(fit1, cores = 2)
+#' print(loo1)
+#' loo2 <- loo(fit2, cores = 2)
+#' print(loo2)
+#'
+#' # when comparing exactly two models, the reported 'elpd_diff'
+#' # will be positive if the expected predictive accuracy for the
+#' # second model is higher. the approximate standard error of the
+#' # difference is also reported.
+#' compare_models(loo1, loo2)
+#' compare_models(loos = list(loo1, loo2)) # can also provide list
+#'
+#' # when comparing three or more models they are ordered by
+#' # expected predictive accuracy. elpd_diff and se_diff are relative
+#' # to the model with best elpd_loo (first row)
+#' fit3 <- stan_glm(mpg ~ disp * as.factor(cyl), data = mtcars)
+#' loo3 <- loo(fit3, cores = 2, k_threshold = 0.7)
+#' compare_models(loo1, loo2, loo3)
+#'
+#' # setting detail=TRUE will also print model formulas
+#' compare_models(loo1, loo2, loo3, detail=TRUE)
+#'
+#' # Computing model weights
+#' model_list <- stanreg_list(fit1, fit2, fit3)
+#' loo_model_weights(model_list, cores = 2) # can specify k_threshold=0.7 if necessary
+#'
+#' # if you have already computed loo then it's more efficient to pass a list
+#' # of precomputed loo objects than a "stanreg_list", avoiding the need
+#' # for loo_models weights to call loo() internally
+#' loo_list <- list(fit1 = loo1, fit2 = loo2, fit3 = loo3) # names optional (affects printing)
+#' loo_model_weights(loo_list)
+#'
+#' # 10-fold cross-validation
+#' (kfold1 <- kfold(fit1, K = 10))
+#' kfold2 <- kfold(fit2, K = 10)
+#' compare_models(kfold1, kfold2, detail=TRUE)
+#'
+#' # Cross-validation stratifying by a grouping variable
+#' # (note: might get some divergences warnings with this model but
+#' # this is just intended as a quick example of how to code this)
+#' library(loo)
+#' fit4 <- stan_lmer(mpg ~ disp + (1|cyl), data = mtcars)
+#' table(mtcars$cyl)
+#' folds_cyl <- kfold_split_stratified(K = 3, x = mtcars$cyl)
+#' table(cyl = mtcars$cyl, fold = folds_cyl)
+#' kfold4 <- kfold(fit4, K = 3, folds = folds_cyl)
+#' }
+#'
+#' @importFrom loo loo loo.function loo.matrix
+#'
+loo.stanmstte <-
+  function(x,
+           ...,
+           cores = getOption("mc.cores", 1),
+           save_psis = FALSE,
+           k_threshold = NULL) {
+    if (!used.sampling(x))
+      STOP_sampling_only("loo")
+    if (model_has_weights(x))
+      recommend_exact_loo(reason = "model has weights")
+
+    user_threshold <- !is.null(k_threshold)
+    if (user_threshold) {
+      validate_k_threshold(k_threshold)
+    } else {
+      k_threshold <- 0.7
+    }
+
+    has_quadrature <- any(x$has_quadrature)
+
+
+    if (has_quadrature) {
+      # ll <- log_lik.stanreg(x)
+      # r_eff <- loo::relative_eff(exp(ll), chain_id = chain_id, cores = cores)
+      # loo_x <-
+      #   suppressWarnings(loo.matrix(
+      #     ll,
+      #     r_eff = r_eff,
+      #     cores = cores,
+      #     save_psis = save_psis
+      #   ))
+      #  not implemented now.
+    } else {
+      args <- ll_args(x)
+      llfun <- ll_fun(x)
+      likfun <- function(data_i, draws) {
+        exp(llfun(data_i, draws))
+      }
+      r_eff <- loo::relative_eff(
+        # using function method
+        x = likfun,
+        chain_id = chain_id,
+        data = args$data,
+        draws = args$draws,
+        cores = cores,
+        ...
+      )
+      loo_x <- suppressWarnings(
+        loo.function(
+          llfun,
+          data = args$data,
+          draws = args$draws,
+          r_eff = r_eff,
+          ...,
+          cores = cores,
+          save_psis = save_psis
+        )
+      )
+    }
+
+
+    # chain_id to pass to loo::relative_eff
+    chain_id <- chain_id_for_loo(x)
+
+
+    ll <- log_lik(x)
+    r_eff <- loo::relative_eff(exp(ll), chain_id = chain_id, cores = cores)
+    loo_x <-
+      suppressWarnings(loo.matrix(
+        ll,
+        r_eff = r_eff,
+        cores = cores,
+        save_psis = save_psis
+      ))
+
+
+    args <- ll_args(x)
+    llfun <- ll_fun(x)
+    likfun <- function(data_i, draws) {
+      exp(llfun(data_i, draws))
+    }
+
+
+    if(has_quadrature[1]){
+      ll <- log_lik.stanidm(x)
+      r_eff <- loo::relative_eff(exp(ll),
+                                 chain_id = chain_id,
+                                 cores = cores)
+      loo_x <-
+        suppressWarnings(loo.matrix(
+          ll,
+          r_eff = r_eff,
+          cores = cores,
+          save_psis = save_psis
+        ))
+    } else {
+      args <- ll_args(x)
+      llfun <- ll_fun(x)
+      likfun <- function(data_i, draws) {
+        exp(llfun(data_i, draws))
+      }
+
+      loo_x <- list()
+      for(n in seq_along(args$N) ) {
+        data_n = lapply(args , function(x) x[[n]] )$data
+        draws_n = lapply(args$draws , function(x) x[[n]] )
+
+
+        r_eff <- loo::relative_eff(
+          # using function method
+          x = likfun,
+          chain_id = chain_id,
+          data = data_n,
+          draws =  draws_n,
+          cores = cores,
+          ...
+        )
+        loo_x[[n]] <- suppressWarnings(
+          loo::loo.function(
+            llfun,
+            data = data_n,
+            draws = draws_n,
+            r_eff = r_eff,
+            ...,
+            cores = cores,
+            save_psis = save_psis
+          )
+        )
+      }
+
+      N <- sum(sapply(loo_x, function(l) attr(l, "dims")[2]) )
+      S <- attr(loo_x[[1]], "dims")[1]
+      pointwise <- lapply(loo_x, function(l) l$pointwise)
+      pointwise <- do.call(rbind, pointwise)
+      pareto_k <-  ulist( lapply(loo_x, function(l) l$diagnostics$pareto_k) )
+      n_eff <-  ulist( lapply(loo_x, function(l) l$diagnostics$n_eff) )
+      diagnostics <- nlist(pareto_k, n_eff)
+
+      estimates <- table_of_estimates(pointwise)
+
+      loo_x <- nlist(
+        estimates,
+        pointwise,
+        diagnostics,
+        psis_object = NULL,
+        elpd_loo = estimates[1,1],
+        p_loo = estimates[2,1],
+        looic = estimates[3,1],
+        se_elpd_loo = estimates[1,2],
+        se_p_loo = estimates[2,2],
+        se_looic = estimates[3,2]
+      )
+
+
+      loo_x <- structure(
+        loo_x,
+        dims =  c(S, N),
+        class = c("psis_loo", "loo")
+      )
+    }
+
+    bad_obs <- loo::pareto_k_ids(loo_x, k_threshold)
+    n_bad <- length(bad_obs)
+
+    out <- structure(
+      loo_x,
+      name = deparse(substitute(x)),
+      discrete = is_discrete(x),
+      yhash = hash_y(x),
+      formula = loo_model_formula(x)
+    )
+
+    if (!length(bad_obs)) {
+      if (user_threshold) {
+        message(
+          "All pareto_k estimates below user-specified threshold of ",
+          k_threshold,
+          ". \nReturning loo object."
+        )
+      }
+      return(out)
+    }
+
+    if (!user_threshold) {
+      if (n_bad > 10) {
+        recommend_kfold(n_bad)
+      } else {
+        recommend_reloo(n_bad)
+      }
+      return(out)
+    }
+
+    return(out)
+
+    # reloo_out <- reloo(x, loo_x, obs = bad_obs)
+    # structure(
+    #   reloo_out,
+    #   name = attr(out, "name"),
+    #   discrete = attr(out, "discrete"),
+    #   yhash = attr(out, "yhash"),
+    #   formula = loo_model_formula(x)
+    # )
+    #
+    # structure(
+    #   reloo_out,
+    #   name = attr(out, "name"),
+    #   discrete = attr(out, "discrete"),
+    #   yhash = attr(out, "yhash"),
+    #   formula = loo_model_formula(x)
+    # )
+
+  }
+
+recommend_exact_loo <- function(reason) {
+  stop(
+    "'loo' is not supported if ", reason, ". ",
+    "If refitting the model 'nobs(x)' times is feasible, ",
+    "we recommend calling 'kfold' with K equal to the ",
+    "total number of observations in the data to perform exact LOO-CV.\n",
+    call. = FALSE
+  )
+}
+
+# chain_id to pass to loo::relative_eff
+chain_id_for_loo <- function(object) {
+  dims <- dim(object$stanfit)[1:2]
+  n_iter <- dims[1]
+  n_chain <- dims[2]
+  rep(1:n_chain, each = n_iter)
+}
+
+
+#--- ll_args for stansurv models
+ll_args.stanmstte <- function(object, newdata = NULL, ...) {
+
+  validate_stanmstte_object(object)
+
+  if (is.null(newdata)) {
+    newdata <- get_model_data(object)
+  }
+  newdata <- lapply(newdata, function (nd) as.data.frame(nd))
+
+  # response, ie. a Surv object
+  form <- lapply(formula(object), function(f) as.formula(f) )
+  y    <- lapply(seq_len(object$n_transitions), function(n_t) eval(form[[n_t]][[2L]], newdata[[n_t]]) )
+
+  # outcome, ie. time variables and status indicator
+  t_beg   <- lapply(y, function(y_n) make_t(y_n, type = "beg") ) # entry time
+  t_end   <- lapply(y, function(y_n) make_t(y_n,  type = "end") ) # exit  time
+  t_upp   <- lapply(y, function(y_n) make_t(y_n,  type = "upp") ) # upper time for interval censoring
+  status  <- lapply(y, function(y_n) make_d(y_n) )
+  for(i in seq_along(status)){
+    if (any(status[[i]] < 0 || status[[i]] > 3))
+      stop2("Invalid status indicator in Surv object.")
+  }
+
+  # delayed entry indicator for each row of data
+  delayed <- lapply(t_beg, function(t_beg_n) as.logical(!t_beg_n == 0) )
+
+  # we reconstruct the design matrices even if no newdata, since it is
+  # too much of a pain to store everything in the fitted model object
+  # (e.g. w/ delayed entry, interval censoring, quadrature points, etc)
+  pp <- pp_data(object, newdata, times = t_end)
+
+  # returned object depends on quadrature not implemented
+  if (object$has_quadrature) {
+    # pp_qpts_beg <- pp_data(object, newdata, times = t_beg, at_quadpoints = TRUE)
+    # pp_qpts_end <- pp_data(object, newdata, times = t_end, at_quadpoints = TRUE)
+    # pp_qpts_upp <- pp_data(object, newdata, times = t_upp, at_quadpoints = TRUE)
+    # cpts <- c(pp$pts, pp_qpts_beg$pts, pp_qpts_end$pts, pp_qpts_upp$pts)
+    # cwts <- c(pp$wts, pp_qpts_beg$wts, pp_qpts_end$wts, pp_qpts_upp$wts)
+    # cids <- c(pp$ids, pp_qpts_beg$ids, pp_qpts_end$ids, pp_qpts_upp$ids)
+    # x <- rbind(pp$x, pp_qpts_beg$x, pp_qpts_end$x, pp_qpts_upp$x)
+    # s <- rbind(pp$s, pp_qpts_beg$s, pp_qpts_end$s, pp_qpts_upp$s)
+    # x <- append_prefix_to_colnames(x, "x__")
+    # s <- append_prefix_to_colnames(s, "s__")
+    # status  <- c(status,  rep(NA, length(cids) - length(status)))
+    # delayed <- c(delayed, rep(NA, length(cids) - length(delayed)))
+    # data <- data.frame(cpts, cwts, cids, status, delayed)
+    # data <- cbind(data, x, s)
+  } else {
+    x <- append_prefix_to_colnames(pp$x, "x__")
+    cids <- lapply(t_end, function(t) seq_along(t) )
+    data <- Matrix::Matrix( am( data.frame(
+      cids = ulist(cids),
+      t_beg = ulist(t_beg),
+      t_end = ulist(t_end),
+      t_upp = ulist(t_upp),
+      status = ulist(status),
+      delayed = ulist(delayed) ) )
+
+    )
+    data <- cbind(data, x)
+  }
+
+  # parameter draws
+  draws                <- list()
+  pars                 <- extract_pars(object)
+  draws$basehaz        <- get_basehaz (object)
+  draws$aux            <- pars$aux
+  draws$alpha          <- pars$alpha
+  draws$beta           <- pars$beta
+  draws$beta_tde       <- pars$beta_tde
+  draws$has_quadrature <- pp$has_quadrature
+  draws$qnodes         <- pp$qnodes
+
+  out <- nlist(data, draws, S = NROW(draws$beta), N = n_distinct(cids))
+  return(out)
+}
+
+
+
+
+
+#' Pointwise log-likelihood matrix
+#'
+#' For models fit using MCMC only, the \code{log_lik} method returns the
+#' \eqn{S} by \eqn{N} pointwise log-likelihood matrix, where \eqn{S} is the size
+#' of the posterior sample and \eqn{N} is the number of data points, or in the
+#' case of the \code{stanmvreg} method (when called on \code{\link{stan_jm} and \code{\link{stan_mstte}}}
+#' model objects) an \eqn{S} by \eqn{Npat} matrix where \eqn{Npat} is the number
+#' of individuals.
+#'
+#' @aliases log_lik
+#' @export
+#'
+#' @param newdata An optional data frame of new data (e.g. holdout data) to use
+#'   when evaluating the log-likelihood. See the description of \code{newdata}
+#'   for \code{\link{posterior_predict}}.
+#' @param offset A vector of offsets. Only required if \code{newdata} is
+#'   specified and an \code{offset} was specified when fitting the model.
+#'
+#' @return For the \code{stanreg} and \code{stanmvreg} methods an \eqn{S} by
+#'   \eqn{N} matrix, where \eqn{S} is the size of the posterior sample and
+#'   \eqn{N} is the number of data points. For the \code{stanjm} and \code{stanmstte} method
+#'   an \eqn{S} by \eqn{Npat} matrix where \eqn{Npat} is the number of individuals.
+#'
+#'
+#' @examples
+#' \donttest{
+#'  roaches$roach100 <- roaches$roach1 / 100
+#'  fit <- stan_glm(
+#'     y ~ roach100 + treatment + senior,
+#'     offset = log(exposure2),
+#'     data = roaches,
+#'     family = poisson(link = "log"),
+#'     prior = normal(0, 2.5),
+#'     prior_intercept = normal(0, 10),
+#'     iter = 500 # to speed up example
+#'  )
+#'  ll <- log_lik(fit)
+#'  dim(ll)
+#'  all.equal(ncol(ll), nobs(fit))
+#'
+#'  # using newdata argument
+#'  nd <- roaches[1:2, ]
+#'  nd$treatment[1:2] <- c(0, 1)
+#'  ll2 <- log_lik(fit, newdata = nd, offset = c(0, 0))
+#'  head(ll2)
+#'  dim(ll2)
+#'  all.equal(ncol(ll2), nrow(nd))
+#' }
+#'
+log_lik.stanmstte <- function(object, newdata = NULL, ...) {
+  # if (!used.sampling(object))
+  #   STOP_sampling_only("Pointwise log-likelihood matrix")
+  # validate_stanmstte_object(object)
+  #
+  # n_tra <- get_T(object)
+  # if ("n_tra" %in% names(list(...)))
+  #   stop("'n_tra' should not be specified for stan_mstte objects since the ",
+  #        "log-likelihood is calculated for the full joint model.")
+  # if(!is.null(newdata)) {
+  #   newdatas <- validate_newdatas(object, newdataLong, newdataEvent)
+  #   if(is.data.frame(newdata)){
+  #     if("trans" %!in% names(newdata) )
+  #       stop2("New data-frame must be supplied with a column trans for transition.")
+  #   } else if(is.list(newdata)){
+  #     if(!identical(length(newdata), ntra) )
+  #       stop2("Newdata must be supplied as a list with an element for each transition.")
+  #   } else {
+  #     stop2("Newdata must be supplied either as data-frame or list.")
+  #   }
+  # }
+  #
+  # if (!is.null(newdataLong)) {
+  #   newdatas <- validate_newdatas(object, newdataLong, newdataEvent)
+  #   newdataLong  <- newdatas[1:M]
+  #   newdataEvent <- newdatas[["Event"]]
+  # }
+  # pars <- extract_pars(object) # full array of draws
+  # data <- .pp_data_jm(object, newdataLong, newdataEvent)
+  # calling_fun <- as.character(sys.call(-1))[1]
+  # reloo_or_kfold <- calling_fun %in% c("kfold", "reloo")
+  # val <- .ll_jm(object, data, pars, reloo_or_kfold = reloo_or_kfold, ...)
+  # return(val)
+  # not implemented
+}
+
+# Return a data frame for each submodel that:
+# (1) only includes variables used in the model formula
+# (2) only includes rows contained in the glmod/coxmod model frames
+# (3) ensures that additional variables that are required
+#     such as the ID variable or variables used in the
+#     interaction-type association structures, are included.
+#
+# It is necessary to drop unneeded variables though so that
+# errors are not encountered if the original data contained
+# NA values for variables unrelated to the model formula.
+# We generate a data frame here for in-sample predictions
+# rather than using a model frame, since some quantities will
+# need to be recalculated at quadrature points etc, for example
+# in posterior_survfit.
+#
+# @param object A stanmstte object.
+# @param m Integer specifying which submodel to get the
+#   prediction data frame for (for stanmvreg or stanjm objects).
+# @return A data frame or list of data frames with all the
+#   (unevaluated) variables required for predictions.
+get_model_data <- function(object, ...) UseMethod("get_model_data")
+
+# ---- pp_data
+get_model_data.stanmstte <- function(object, ...) {
+  validate_stanmstte_object(object)
+  terms <- terms(object)
+  row_nms <- lapply(object$model_frame, function(mf) {
+    row.names(mf)
+  })
+  lapply(seq_len(object$n_transitions), function(n_t){
+    newdata <- get_all_vars(terms[[n_t]], object$data[[n_t]])[row_nms[[n_t]], , drop = FALSE]
+  })
+}
+
+pp_data <-
+  function(object,
+           newdata = NULL,
+           re.form = NULL,
+           offset = NULL,
+           m = NULL,
+           ...) {
+    validate_stanmstte_object(object)
+    if (is.stanmstte(object)) {
+      return(.pp_data_mstte(object, newdata = newdata, ...))
+    }
+  }
+
+
+#------------------  for models fit using stan_mstte  -----------------------
+# Return the design matrices required for evaluating the linear predictor or
+# log-likelihood in post-estimation functions for a \code{stan_mstte} model
+
+.pp_data_mstte <- function(object,
+                          newdata = NULL,
+                          times   = NULL,
+                          at_quadpoints = FALSE,
+                          ...) {
+
+  formula <- object$formula
+  basehaz <- object$basehaz
+
+  if (is.null(newdata))
+    newdata <- get_model_data(object)
+
+  # flags
+  has_tde        <- object$has_tde
+  has_quadrature <- object$has_quadrature
+
+  # define dimensions and times for quadrature
+  if (any(has_quadrature) && at_quadpoints) {
+
+    # if (is.null(times))
+    #   stop("Bug found: 'times' must be specified.")
+    #
+    # # error check time variables
+    # if (!length(times) == nrow(newdata))
+    #   stop("Bug found: length of 'times' should equal number rows in the data.")
+    #
+    # # number of nodes
+    # qnodes <- object$qnodes
+    #
+    # # standardised weights and nodes for quadrature
+    # qq <- get_quadpoints(nodes = qnodes)
+    # qp <- qq$points
+    # qw <- qq$weights
+    #
+    # # quadrature points & weights, evaluated for each row of data
+    # pts <- uapply(qp, unstandardise_qpts, 0, times)
+    # wts <- uapply(qw, unstandardise_qwts, 0, times)
+    #
+    # # id vector for quadrature points
+    # ids <- rep(seq_along(times), times = qnodes)
+    #  not implemented
+
+  } else { # predictions don't require quadrature
+
+    pts    <- times
+    wts    <- lapply(times, function(t) rep(NA, length(t)) )
+    ids    <- if(!is.null(object$id_vars) ) object$id_vars else  lapply(object$model_frame, function(mf) {
+      row.names(mf)
+    })
+
+  }
+
+  # time-fixed predictor matrix
+  tf_form <- lapply(formula, function(f) reformulate_rhs(rhs(f$tf_form)) )
+  mf <- lapply(seq_len(object$n_transitions), function(nt) make_model_frame(tf_form[[nt]], newdata[[nt]], check_constant = FALSE)$mf )
+  x  <- lapply(seq_len(object$n_transitions), function(nt){
+    out <- make_x(tf_form[[nt]], mf[[nt]], xlevs= object$xlevs, check_constant = FALSE)$x
+    colnames(out) <- append_trans(colnames(out), nt, object$transition_labels[nt])
+    out <- as.data.frame(out)
+    tibble::rownames_to_column(out, var = "id_for_passing_to_sparse_matrix")
+  }  )
+  x <-  Matrix::Matrix( am( suppressMessages( Reduce(full_join_NA, x) %>%
+         dplyr::select(-id_for_passing_to_sparse_matrix)) ), sparse = TRUE)
+
+  if (any(has_quadrature) && at_quadpoints) {
+    # x <- rep_rows(x, times = qnodes)
+    # ni
+  }
+
+  # time-varying predictor matrix
+  if (any(has_tde) ) { # model has tde not implmented
+    # if (at_quadpoints) {
+    #   # expand covariate data
+    #   newdata <- rep_rows(newdata, times = qnodes)
+    # }
+    # if (all(is.na(pts))) {
+    #   # temporary replacement to avoid error in creating spline basis
+    #   pts_tmp <- rep(0, length(pts))
+    # } else {
+    #   # else use prediction times or quadrature points
+    #   pts_tmp <- pts
+    # }
+    # s <- make_s(formula = object$formula$td_form,
+    #             data    = newdata,
+    #             times   = pts_tmp,
+    #             xlevs   = object$xlevs)
+    # if (all(is.na(pts))) {
+    #   # if pts were all NA then replace the time-varying predictor
+    #   # matrix with all NA, but retain appropriate dimensions
+    #   s[] <- NaN
+    # }
+  } else { # model does not have tde
+    s <- matrix(0, length(pts), 0)
+  }
+
+  # return object
+  return(nlist(pts,
+               wts,
+               ids,
+               x,
+               s,
+               has_quadrature,
+               at_quadpoints,
+               qnodes = object$qnodes))
+}
+

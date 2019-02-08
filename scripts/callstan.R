@@ -1,4 +1,3 @@
-
 library(rstanarm)
 library(rstan)
 options(mc.cores = 2)

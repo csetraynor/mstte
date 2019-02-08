@@ -225,7 +225,7 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
                      transition_labels = NULL,
                      transmat,
                      prep = FALSE,
-                     ids,
+                     id_var,
                      status,
                      times,
                      keep,
@@ -263,6 +263,13 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
 
   if (missing(data) || !inherits(data, "data.frame"))
     stop("'data' must be a data frame.")
+
+  if (missing(id_var)){
+    warning2("ID vars not indicated this is not recommended by deafult formula 1 must contains all the ids and time 0.")
+    id_var <-  NULL
+  } else {
+    id_var <- unique(id_var)
+  }
 
   dots      <- list(...)
   algorithm <- match.arg(algorithm)

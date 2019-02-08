@@ -6,12 +6,13 @@
 \usage{
 mstte_stan(formula = lapply(1:3, function(x) as.formula(Surv(time = time,
   event = status) ~ 1)), transition_labels = NULL, transmat,
-  prep = FALSE, ids, status, times, keep, data, basehaz = lapply(1:3,
-  function(x) "ms"), basehaz_ops = NULL, prior = lapply(1:3,
-  function(x) rstanarm::normal()), prior_intercept = lapply(1:3,
-  function(x) rstanarm::normal()), prior_aux = lapply(1:3, function(x)
-  rstanarm::normal()), prior_PD = FALSE, algorithm = c("sampling",
-  "meanfield", "fullrank"), adapt_delta = 0.99, ...)
+  prep = FALSE, id_var, status, times, keep, data,
+  basehaz = lapply(1:3, function(x) "ms"), basehaz_ops = NULL,
+  prior = lapply(1:3, function(x) rstanarm::normal()),
+  prior_intercept = lapply(1:3, function(x) rstanarm::normal()),
+  prior_aux = lapply(1:3, function(x) rstanarm::normal()),
+  prior_PD = FALSE, algorithm = c("sampling", "meanfield", "fullrank"),
+  adapt_delta = 0.99, ...)
 }
 \arguments{
 \item{formula}{A list of Surv formula}
