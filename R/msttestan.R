@@ -53,7 +53,7 @@ msttestan <- function(object) {
     terms         = object$terms,
     data          = object$data,
     transition_labels = object$transition_labels,
-    n_transitions = object$length_of_transition,
+    n_trans       = object$length_of_transition,
     model_frame   = object$model_frame,
     x             = object$x,
     s_cpts        = object$s_cpts,

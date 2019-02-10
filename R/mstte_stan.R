@@ -222,7 +222,7 @@
 #' }
 mstte_stan <- function(formula = lapply(1:3, function (x)
   as.formula(Surv(time=time,event=status)~1) ),
-                     transition_labels = NULL,
+                     transition_labels,
                      transmat,
                      prep = FALSE,
                      id_var,
@@ -230,15 +230,11 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
                      times,
                      keep,
                      data,
-                     basehaz = lapply(1:3, function(x)
-                       "ms"),
-                     basehaz_ops = NULL,
-                     prior = lapply(1:3, function(x)
-                       rstanarm::normal() ),
-                     prior_intercept  = lapply(1:3, function(x)
-                       rstanarm::normal() ),
-                     prior_aux = lapply(1:3, function(x)
-                       rstanarm::normal() ),
+                     basehaz,
+                     basehaz_ops,
+                     prior,
+                     prior_intercept,
+                     prior_aux,
                      prior_PD        = FALSE,
                      algorithm       = c("sampling", "meanfield", "fullrank"),
                      adapt_delta     = 0.99, ...
@@ -265,11 +261,12 @@ mstte_stan <- function(formula = lapply(1:3, function (x)
     stop("'data' must be a data frame.")
 
   if (missing(id_var)){
-    warning2("ID vars not indicated this is not recommended by deafult formula 1 must contains all the ids and time 0.")
-    id_var <-  NULL
-  } else {
-    id_var <- unique(id_var)
+    id_var <-  rownames(data)
   }
+  if(missing(transition_labels)){
+    transition_labels <- seq_len(nt)
+  }
+
 
   dots      <- list(...)
   algorithm <- match.arg(algorithm)

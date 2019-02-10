@@ -271,12 +271,157 @@ used.variational <- function(x) {
   x$algorithm %in% c("meanfield", "fullrank")
 }
 
+# loo internal ----------------------------------------------------------------
+validate_k_threshold <- function(k) {
+  if (!is.numeric(k) || length(k) != 1) {
+    stop("'k_threshold' must be a single numeric value.",
+         call. = FALSE)
+  } else if (k < 0) {
+    stop("'k_threshold' < 0 not allowed.",
+         call. = FALSE)
+  } else if (k > 1) {
+    warning(
+      "Setting 'k_threshold' > 1 is not recommended.",
+      "\nFor details see the PSIS-LOO section in help('loo-package', 'loo').",
+      call. = FALSE
+    )
+  }
+}
+
+
+# Split a vector or matrix into a specified number of segments and return
+# each segment as an element of a list. The matrix method allows splitting
+# across the column (bycol = TRUE) or row margin (bycol = FALSE).
+#
+# @param x A vector or matrix.
+# @param n_segments Integer specifying the number of segments.
+# @param bycol Logical, should a matrix be split along the column or row margin?
+# @return A list with n_segments elements.
+split2 <- function(x, n_segments = 1, ...) {
+  UseMethod("split2")
+}
+
+split2.vector <- function(x, n_segments = 1, ...) {
+  len <- length(x)
+  segment_length <- len %/% n_segments
+  if (!len == (segment_length * n_segments))
+    stop("Dividing x by n_segments does not result in an integer.")
+  split(x, rep(1:n_segments, each = segment_length))
+}
+
+split2.matrix <- function(x, n_segments = 1, bycol = TRUE) {
+  len <- if (bycol) ncol(x) else nrow(x)
+  segment_length <- len %/% n_segments
+  if (!len == (segment_length * n_segments))
+    stop("Dividing x by n_segments does not result in an integer.")
+  lapply(1:n_segments, function(k) {
+    if (bycol) x[, (k-1) * segment_length + 1:segment_length, drop = FALSE] else
+      x[(k-1) * segment_length + 1:segment_length, , drop = FALSE]})
+}
+
+# Split a vector or matrix into a specified number of segments
+# (see rstanarm:::split2) and then reduce it using 'FUN'
+split_and_reduce <- function(x, n_segments = 1, bycol = TRUE, FUN = '+') {
+  splitted_x <- split2(x, n_segments = n_segments, bycol = bycol)
+  Reduce(FUN, splitted_x)
+}
+
+# chain_id to pass to loo::relative_eff
+chain_id_for_loo <- function(object) {
+  dims <- dim(object$stanfit)[1:2]
+  n_iter <- dims[1]
+  n_chain <- dims[2]
+  rep(1:n_chain, each = n_iter)
+}
+
+
+# check if discrete or continuous
+# @param object stanreg object
+is_discrete <- function(object) {
+  if (inherits(object, "polr"))
+    return(TRUE)
+  if (inherits(object, "stansurv"))
+    return(FALSE)
+  if (inherits(object, "stanmstte"))
+    return(FALSE)
+  if (inherits(object, "stanmvreg")) {
+    fams <- fetch(family(object), "family")
+    res <- sapply(fams, function(x)
+      is.binomial(x) || is.poisson(x) || is.nb(x))
+    return(res)
+  }
+  fam <- family(object)$family
+  is.binomial(fam) || is.poisson(fam) || is.nb(fam)
+}
+
+# Calculate a SHA1 hash of y
+# @param x stanreg object
+# @param ... Passed to digest::sha1
+#
+hash_y <- function(x, ...) {
+  if (!requireNamespace("digest", quietly = TRUE))
+    stop("Please install the 'digest' package.")
+  validate_stanmstte_object(x)
+  y <- get_y(x)
+  for(i in seq_along(y)){
+    attributes( y[[i]] ) <- NULL
+  }
+  digest::sha1(x = y, ...)
+}
+
+# validate objects for model comparison
+validate_loos <- function(loos = list()) {
+  if (length(loos) <= 1)
+    stop("At least two objects are required for model comparison.",
+         call. = FALSE)
+
+  is_loo <- sapply(loos, is.loo)
+  is_waic <- sapply(loos, is.waic)
+  is_kfold <- sapply(loos, is.kfold)
+  if (!all(is_loo))
+    stop("All objects must have class 'loo'", call. = FALSE)
+  if ((any(is_waic) && !all(is_waic) ||
+       (any(is_kfold) && !all(is_kfold))))
+    stop("Can't mix objects computed using 'loo', 'waic', and 'kfold'.",
+         call. = FALSE)
+
+  yhash <- lapply(loos, attr, which = "yhash")
+  yhash_check <- sapply(yhash, function(x) {
+    isTRUE(all.equal(x, yhash[[1]]))
+  })
+  if (!all(yhash_check))
+    stop("Not all models have the same y variable.", call. = FALSE)
+
+  discrete <- sapply(loos, attr, which = "discrete")
+  if (!all(discrete == discrete[1]))
+    stop("Discrete and continuous observation models can't be compared.",
+         call. = FALSE)
+
+  setNames(loos, nm = lapply(loos, attr, which = "name"))
+}
+
+# model formula to store in loo object
+# @param x stanreg object
+loo_model_formula <- function(x) {
+  form <- try(formula(x), silent = TRUE)
+  if (inherits(form, "try-error") || is.null(form)) {
+    form <- "formula not found"
+  }
+  return(form)
+}
+
 
 # ------------- Helpers ---------------#
+# Count the number of unique values
+#
+# @param x A vector or list
+n_distinct <- function(x) {
+  length(unique(x))
+}
 # Left join NA to 0 for sparse matrix
 full_join_NA <- function(x, y, ...) {
   dplyr::full_join(x = x, y = y, by = ...) %>%
-    dplyr::mutate_each(funs(replace(., which(is.na(.)), 0)))
+    dplyr::mutate_each(dplyr::funs(replace(., which(is.na(.)), 0)))
 }
 # Combine pars and regex_pars
 #
@@ -299,7 +444,6 @@ collect_pars <- function(x, pars = NULL, regex_pars = NULL) {
 b_names <- function(x, ...) {
   grep("^b\\[", x, ...)
 }
-
 # Extract parameters from stanmat and return as a list
 #
 # @param object A stanmvreg or stansurv object
@@ -317,16 +461,17 @@ extract_pars.stanmstte <- function(object, stanmat = NULL, means = FALSE) {
   if (means)
     stanmat <- t(colMeans(stanmat)) # return posterior means
   nms_beta <- lapply(object$x, function(x) colnames(x) )
-  nms_beta <- uapply(seq_len(object$n_transitions), function(i)
-    append_trans(nms_beta[[i]], i, object$transition_labels[i]) )
+  nms_beta <- uapply(seq_len(object$n_trans), function(i)
+     append_trans_to_pars(nms_beta[[i]], i, object$transition_labels[i])
+  )
   nms_tde  <- get_smooth_name(object$s_cpts, type = "smooth_coefs")
   nms_smth <- get_smooth_name(object$s_cpts, type = "smooth_sd")
   nms_int  <- lapply(object$basehaz, function(b) get_int_name_basehaz(b) )
-  nms_int <- uapply(seq_len(object$n_transitions), function(i)
-    append_trans(nms_int[[i]], i, object$transition_labels[i]) )
+  nms_int <- uapply(seq_len(object$n_trans), function(i)
+    append_trans_to_pars(nms_int[[i]], i, object$transition_labels[i]) )
   nms_aux  <- lapply(object$basehaz, function(b)  get_aux_name_basehaz(b) )
-  nms_aux <- uapply(seq_len(object$n_transitions), function(i)
-    append_trans(nms_aux[[i]], i, object$transition_labels[i]) )
+  nms_aux <- uapply(seq_len(object$n_trans), function(i)
+    append_trans_to_pars(nms_aux[[i]], i, object$transition_labels[i]) )
   alpha    <- stanmat[, nms_int,  drop = FALSE]
   beta     <- stanmat[, nms_beta, drop = FALSE]
   beta_tde <- stanmat[, nms_tde,  drop = FALSE]
@@ -374,7 +519,15 @@ table_of_estimates <- function(x) {
 }
 
 append_trans <- function(x, i, labs){
-  if(is.null(x)) return(NULL)
+  if(is.null(labs)){
+    paste0(x," trans(",i,")" )
+  } else {
+    paste0(x," trans(",labs,")" )
+  }
+}
+
+append_trans_to_pars <- function(x, i, labs){
+  if(is.null(x) ) return(NULL)
   if(is.null(labs)){
     paste0(x," trans(",i,")" )
   } else {
@@ -391,14 +544,13 @@ set_colnames <- function(x, names) { colnames(x) <- names; x }
 
 append_title <- function(object){
   if(is.null(object$transition_labels)){
-    paste("\nTransition", seq_len(object$length_of_transition),"\n")
+    paste("\nTransition", seq_len(object$n_trans),"\n")
   } else {
     paste("\nTransition", object$transition_labels,"\n")
   }
 }
 
 get_transition_name <- function(obj, i){
-
   append_trans(NULL, i, obj$transition_labels[i])
 }
 
@@ -441,12 +593,47 @@ get_x.default <- function(object, ...) {
 }
 #' @export
 get_y.stanmstte <- function(object, ind, ...) {
-  object[["y"]][[ind]] %ORifNULL% model.response(model.frame(object))
+  if(!missing(ind))
+    object[["y"]][[ind]] %ORifNULL% model.response(model.frame(object))
+  else {
+      lapply(object$model_frame, function(m) model.response(m) )
+  }
 }
 #' @export
 get_x.default <- function(object, ind, ...) {
   object[["x"]][[ind]] %ORifNULL% model.matrix(object)
 }
+
+# Methods for creating linear predictor
+#
+# Make linear predictor vector from x and point estimates for beta, or linear
+# predictor matrix from x and full posterior sample of beta.
+#
+# @param beta A vector or matrix or parameter estimates.
+# @param x Predictor matrix.
+# @param offset Optional offset vector.
+# @return A vector or matrix.
+linear_predictor <- function(beta, x, offset = NULL) {
+  UseMethod("linear_predictor")
+}
+linear_predictor.default <- function(beta, x, offset = NULL) {
+  eta <- as.vector(if (NCOL(x) == 1L) x * beta else x %*% beta)
+  if (length(offset))
+    eta <- eta + offset
+
+  return(eta)
+}
+linear_predictor.matrix <- function(beta, x, offset = NULL) {
+  if (NCOL(beta) == 1L)
+    beta <- as.matrix(beta)
+  eta <- beta %*% t(x)
+  if (length(offset))
+    eta <- sweep(eta, 2L, offset, `+`)
+
+  return(eta)
+}
+
+
 
 # Wrapper for rstan::summary
 # @param stanfit A stanfit object created using rstan::sampling or rstan::vb
@@ -770,7 +957,7 @@ make_model_frame <- function(formula, data, check_constant = TRUE) {
 # @param object A stanmvreg object
 get_T <- function(object) {
   validate_stanmvreg_object(object)
-  return(object$n_transitions)
+  return(object$n_trans)
 }
 
 # Return the response vector (time) for estimation
@@ -914,6 +1101,14 @@ rhs <- function(x, as_formula = FALSE) {
     out <- x[[2L]]
   }
   out
+}
+
+get_id_var <- function(x){
+  if(!is.null(x$id_var)){
+    x$id_var
+  } else {
+    as.character( rownames(x) )
+  }
 }
 
 # Return a vector with valid names for elements in the list passed to the

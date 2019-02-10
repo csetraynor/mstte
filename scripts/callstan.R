@@ -1,5 +1,6 @@
 library(rstanarm)
 library(rstan)
+devtools::document()
 options(mc.cores = 2)
 rstan_options(auto_write = TRUE)
 
@@ -118,8 +119,11 @@ prior_aux = lapply(1:6, function(x)
 
 basehaz = lapply(1:6, function(x)
   "ms")
+basehaz[3:5] = lapply(1:3, function(x)
+  "weibull")
+basehaz[[6]] = "exp"
 
-
+options(mc.cores = 2)
 stanfit <- mstte_stan(formula = formula,
                       data = aidss_mst,
                      # transition_labels = c("DP", "DX", "DPDX"),
@@ -133,6 +137,8 @@ stanfit <- mstte_stan(formula = formula,
                       control = list(adapt_delta = 0.95)
 )
 
-
+stanfit
+summary(stanfit)
+loo1 <- loo(stanfit, cores = 2, k_threshold = 0.7)
 
 

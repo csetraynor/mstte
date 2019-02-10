@@ -686,16 +686,16 @@ generated quantities {
 
   int pos_b = 1;
   int pos_vars = 1;
-  int pos_g = 1;
   int pos_int = 1;
   for(k in 1:nt){
     if(type[k] == 4) { // m-splines
       aux[pos_vars:(pos_vars + s_vars[k] - 1)] = segment(coefs, pos_vars, s_vars[k]) * exp(log_crude_event_rate[k] - dot_product(segment(x_bar, pos_b, s_K[k]),
       segment(beta, pos_b, s_K[k])));
     } else { // exp, weibull, gompertz
-    aux[pos_vars] = coefs[pos_vars];
-    alpha[pos_int] = log_crude_event_rate[k] - dot_product(segment(x_bar, pos_b, s_K[k]), segment(beta, pos_b, s_K[k]) ) + gamma[pos_g];
-    pos_g += 1;
+    if(type[k] != 5){
+         aux[pos_vars] = coefs[pos_vars];
+    }
+    alpha[pos_int] = log_crude_event_rate[k] - dot_product(segment(x_bar, pos_b, s_K[k]), segment(beta, pos_b, s_K[k]) ) + gamma[pos_int];
     pos_int += 1;
     }
     pos_vars += s_vars[k];

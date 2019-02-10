@@ -218,7 +218,7 @@ summary.stanmstte <- function(object, pars = NULL, regex_pars = NULL,
     basehaz       = if (surv){
       basehaz_string(get_basehaz(object))
     } else if (mstte){
-      lapply(seq_len(object$length_of_transition), function(i)
+      lapply(seq_len(object$n_trans), function(i)
         basehaz_string(get_basehaz(object, i)) )
     }
     else NULL,
@@ -229,7 +229,7 @@ summary.stanmstte <- function(object, pars = NULL, regex_pars = NULL,
     nevents       = if (surv){
       object$nevents
     } else if (mstte){
-      lapply(seq_len(object$length_of_transition), function(i)
+      lapply(seq_len(object$n_trans), function(i)
         object$nevents[[i]])
     } else {
       NULL
@@ -237,7 +237,7 @@ summary.stanmstte <- function(object, pars = NULL, regex_pars = NULL,
     nlcens        = if (surv){
       object$nlcens
     } else if (mstte){
-      lapply(seq_len(object$length_of_transition), function(i)
+      lapply(seq_len(object$n_trans), function(i)
         object$nlcens[[i]])
     } else {
       NULL
@@ -245,7 +245,7 @@ summary.stanmstte <- function(object, pars = NULL, regex_pars = NULL,
     nrcens        = if (surv){
       object$nrcens
     } else if (mstte){
-      lapply(seq_len(object$length_of_transition), function(i)
+      lapply(seq_len(object$n_trans), function(i)
         object$nrcens[[i]])
     } else {
       NULL
@@ -253,7 +253,7 @@ summary.stanmstte <- function(object, pars = NULL, regex_pars = NULL,
     nicens        = if (surv){
       object$nicens
     } else if (mstte){
-      lapply(seq_len(object$length_of_transition), function(i)
+      lapply(seq_len(object$n_trans), function(i)
         object$nicens[[i]])
     } else {
       NULL
@@ -261,13 +261,13 @@ summary.stanmstte <- function(object, pars = NULL, regex_pars = NULL,
     ndelayed      = if (surv){
       object$ndelayed
     } else if (mstte){
-      lapply(seq_len(object$length_of_transition), function(i)
+      lapply(seq_len(object$n_trans), function(i)
         object$ndelayed[[i]])
     } else {
       NULL
     },
     transition_labels = if(mstte) object$transition_labels else NULL,
-    length_of_transition = if(mstte) object$length_of_transition else NULL,
+    n_trans = if(mstte) object$n_trans else NULL,
     print.digits  = digits,
     priors        = object$prior.info,
     class         = c("summary.stanmstte")
@@ -292,7 +292,7 @@ print.summary.stanmstte <- function(x, digits = max(2, attr(x, "print.digits")),
 
   title <- append_title(atts)
 
-  for(i in seq_len(atts$length_of_transition)){
+  for(i in seq_len(atts$n_trans)){
     cat("\n ---------------- \n")
     cat(title[[i]])
     cat("\n baseline hazard:", atts$basehaz[[i]] )
