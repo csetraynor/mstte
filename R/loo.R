@@ -582,7 +582,9 @@ pp_data <-
   mf <- lapply(seq_len(object$n_trans), function(nt) make_model_frame(tf_form[[nt]], newdata[[nt]], check_constant = FALSE)$mf )
   x  <- lapply(seq_len(object$n_trans), function(nt){
     out <- make_x(tf_form[[nt]], mf[[nt]], xlevs= object$xlevs, check_constant = FALSE)$x
-    colnames(out) <- append_trans(colnames(out), nt, object$transition_labels[nt])
+    if(ncol(out) > 0){
+      colnames(out) <- append_trans(colnames(out), nt, object$transition_labels[nt])
+    }
     out <- as.data.frame(out)
     tibble::rownames_to_column(out, var = "id_for_passing_to__")
   }  )
