@@ -142,3 +142,37 @@ summary(stanfit)
 loo1 <- loo(stanfit, cores = 2, k_threshold = 0.7)
 
 
+######################################################################
+roxygen2::roxygenise(clean = TRUE)
+library(haven)
+library(dplyr)
+send <- read_sas("~/aeim/data-raw/SCL dataset/a_eendpt.sas7bdat")
+death <- read_sas("~/aeim/data-raw/SCL dataset/c_death.sas7bdat")
+nrow(send)
+
+dp <- send %>%
+  dplyr::select(SUBJID, PDCD, PDDY,TXGROUP, DTHX, DTHXDY)
+
+mort <- death %>%
+  dplyr::select(SUBJID, DTHDY , DTCAUSCD)
+
+comp <- dplyr::left_join(dp, mort)
+
+## quality check
+assertthat::assert_that(all(xor(comp$DTHX == 0, !is.na(comp$DTHDY))) )
+
+comp <- comp %>%
+  dplyr::mutate(DIFFDY = DTHXDY - PDDY)
+
+comp$PDCD[comp$DTHX == 1 & comp$DTHXDY == comp$PDDY] <- 0
+
+
+train.index <- createDataPartition(comp$PDCD + comp$DTHX, p = .7, list = FALSE)
+train <- comp[ train.index,]
+test  <- comp[-train.index,]
+
+nrow(train)
+nrow(test)
+nrow(dp)
+
+

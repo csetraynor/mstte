@@ -683,24 +683,32 @@ generated quantities {
   //   - centering of baseline hazard around the crude event rate
   real alpha[N_has_intercept]; // transformed intercept
   vector[Nvars] aux;              // transformed baseline hazard parameters
-
+  {
   int pos_b = 1;
   int pos_vars = 1;
   int pos_int = 1;
   for(k in 1:nt){
     if(type[k] == 4) { // m-splines
-      aux[pos_vars:(pos_vars + s_vars[k] - 1)] = segment(coefs, pos_vars, s_vars[k]) * exp(log_crude_event_rate[k] - dot_product(segment(x_bar, pos_b, s_K[k]),
-      segment(beta, pos_b, s_K[k])));
+    if(s_K[k] > 0){
+    aux[pos_vars:(pos_vars + s_vars[k] - 1)] = segment(coefs, pos_vars, s_vars[k]) * exp(log_crude_event_rate[k] - dot_product(segment(x_bar, pos_b, s_K[k]), segment(beta, pos_b, s_K[k])));
+    } else {
+    aux[pos_vars:(pos_vars + s_vars[k] - 1)] = segment(coefs, pos_vars, s_vars[k]) * exp(log_crude_event_rate[k]);
+    }
+
     } else { // exp, weibull, gompertz
-    if(type[k] != 5){
+    if(type[k] != 5){ // aux for weibull, gompertz
          aux[pos_vars] = coefs[pos_vars];
     }
-    alpha[pos_int] = log_crude_event_rate[k] - dot_product(segment(x_bar, pos_b, s_K[k]), segment(beta, pos_b, s_K[k]) ) + gamma[pos_int];
+    if(s_K[k] > 0){
+      alpha[pos_int] = log_crude_event_rate[k] - dot_product(segment(x_bar,          pos_b, s_K[k]), segment(beta, pos_b, s_K[k]) ) + gamma[pos_int];
+    } else {
+      alpha[pos_int] = log_crude_event_rate[k] + gamma[pos_int];
+    } // center intercept
     pos_int += 1;
     }
     pos_vars += s_vars[k];
     pos_b += s_K[k];
   }
-
+  }
 }
 

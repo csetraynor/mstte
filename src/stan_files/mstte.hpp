@@ -36,7 +36,7 @@ static int current_statement_begin__;
 stan::io::program_reader prog_reader__() {
     stan::io::program_reader reader;
     reader.add_event(0, 0, "start", "model_mstte");
-    reader.add_event(707, 705, "end", "model_mstte");
+    reader.add_event(715, 713, "end", "model_mstte");
     return reader;
 }
 
@@ -2939,9 +2939,6 @@ public:
         names__.push_back("coefs");
         names__.push_back("alpha");
         names__.push_back("aux");
-        names__.push_back("pos_b");
-        names__.push_back("pos_vars");
-        names__.push_back("pos_int");
     }
 
 
@@ -2968,12 +2965,6 @@ public:
         dimss__.push_back(dims__);
         dims__.resize(0);
         dims__.push_back(Nvars);
-        dimss__.push_back(dims__);
-        dims__.resize(0);
-        dimss__.push_back(dims__);
-        dims__.resize(0);
-        dimss__.push_back(dims__);
-        dims__.resize(0);
         dimss__.push_back(dims__);
     }
 
@@ -3112,6 +3103,9 @@ public:
 
             stan::math::initialize(aux, DUMMY_VAR__);
             stan::math::fill(aux,DUMMY_VAR__);
+
+
+            {
             current_statement_begin__ = 687;
             int pos_b(0);
             (void) pos_b;  // dummy to suppress unused var warning
@@ -3139,41 +3133,61 @@ public:
                 if (as_bool(logical_eq(get_base1(type,k,"type",1),4))) {
 
                     current_statement_begin__ = 692;
-                    stan::model::assign(aux, 
-                                stan::model::cons_list(stan::model::index_min_max(pos_vars, ((pos_vars + get_base1(s_vars,k,"s_vars",1)) - 1)), stan::model::nil_index_list()), 
-                                multiply(segment(coefs,pos_vars,get_base1(s_vars,k,"s_vars",1)),stan::math::exp((get_base1(log_crude_event_rate,k,"log_crude_event_rate",1) - dot_product(segment(x_bar,pos_b,get_base1(s_K,k,"s_K",1)),segment(beta,pos_b,get_base1(s_K,k,"s_K",1)))))), 
-                                "assigning variable aux");
+                    if (as_bool(logical_gt(get_base1(s_K,k,"s_K",1),0))) {
+
+                        current_statement_begin__ = 693;
+                        stan::model::assign(aux, 
+                                    stan::model::cons_list(stan::model::index_min_max(pos_vars, ((pos_vars + get_base1(s_vars,k,"s_vars",1)) - 1)), stan::model::nil_index_list()), 
+                                    multiply(segment(coefs,pos_vars,get_base1(s_vars,k,"s_vars",1)),stan::math::exp((get_base1(log_crude_event_rate,k,"log_crude_event_rate",1) - dot_product(segment(x_bar,pos_b,get_base1(s_K,k,"s_K",1)),segment(beta,pos_b,get_base1(s_K,k,"s_K",1)))))), 
+                                    "assigning variable aux");
+                    } else {
+
+                        current_statement_begin__ = 695;
+                        stan::model::assign(aux, 
+                                    stan::model::cons_list(stan::model::index_min_max(pos_vars, ((pos_vars + get_base1(s_vars,k,"s_vars",1)) - 1)), stan::model::nil_index_list()), 
+                                    multiply(segment(coefs,pos_vars,get_base1(s_vars,k,"s_vars",1)),stan::math::exp(get_base1(log_crude_event_rate,k,"log_crude_event_rate",1))), 
+                                    "assigning variable aux");
+                    }
                 } else {
 
-                    current_statement_begin__ = 695;
+                    current_statement_begin__ = 699;
                     if (as_bool(logical_neq(get_base1(type,k,"type",1),5))) {
 
-                        current_statement_begin__ = 696;
+                        current_statement_begin__ = 700;
                         stan::model::assign(aux, 
                                     stan::model::cons_list(stan::model::index_uni(pos_vars), stan::model::nil_index_list()), 
                                     get_base1(coefs,pos_vars,"coefs",1), 
                                     "assigning variable aux");
                     }
-                    current_statement_begin__ = 698;
-                    stan::model::assign(alpha, 
-                                stan::model::cons_list(stan::model::index_uni(pos_int), stan::model::nil_index_list()), 
-                                ((get_base1(log_crude_event_rate,k,"log_crude_event_rate",1) - dot_product(segment(x_bar,pos_b,get_base1(s_K,k,"s_K",1)),segment(beta,pos_b,get_base1(s_K,k,"s_K",1)))) + get_base1(gamma,pos_int,"gamma",1)), 
-                                "assigning variable alpha");
-                    current_statement_begin__ = 699;
+                    current_statement_begin__ = 702;
+                    if (as_bool(logical_gt(get_base1(s_K,k,"s_K",1),0))) {
+
+                        current_statement_begin__ = 703;
+                        stan::model::assign(alpha, 
+                                    stan::model::cons_list(stan::model::index_uni(pos_int), stan::model::nil_index_list()), 
+                                    ((get_base1(log_crude_event_rate,k,"log_crude_event_rate",1) - dot_product(segment(x_bar,pos_b,get_base1(s_K,k,"s_K",1)),segment(beta,pos_b,get_base1(s_K,k,"s_K",1)))) + get_base1(gamma,pos_int,"gamma",1)), 
+                                    "assigning variable alpha");
+                    } else {
+
+                        current_statement_begin__ = 705;
+                        stan::model::assign(alpha, 
+                                    stan::model::cons_list(stan::model::index_uni(pos_int), stan::model::nil_index_list()), 
+                                    (get_base1(log_crude_event_rate,k,"log_crude_event_rate",1) + get_base1(gamma,pos_int,"gamma",1)), 
+                                    "assigning variable alpha");
+                    }
+                    current_statement_begin__ = 707;
                     stan::math::assign(pos_int, (pos_int + 1));
                 }
-                current_statement_begin__ = 701;
+                current_statement_begin__ = 709;
                 stan::math::assign(pos_vars, (pos_vars + get_base1(s_vars,k,"s_vars",1)));
-                current_statement_begin__ = 702;
+                current_statement_begin__ = 710;
                 stan::math::assign(pos_b, (pos_b + get_base1(s_K,k,"s_K",1)));
+            }
             }
 
             // validate generated quantities
             current_statement_begin__ = 684;
             current_statement_begin__ = 685;
-            current_statement_begin__ = 687;
-            current_statement_begin__ = 688;
-            current_statement_begin__ = 689;
 
             // write generated quantities
             for (int k_0__ = 0; k_0__ < N_has_intercept; ++k_0__) {
@@ -3182,9 +3196,6 @@ public:
             for (int k_0__ = 0; k_0__ < Nvars; ++k_0__) {
             vars__.push_back(aux[k_0__]);
             }
-        vars__.push_back(pos_b);
-        vars__.push_back(pos_vars);
-        vars__.push_back(pos_int);
 
         } catch (const std::exception& e) {
             stan::lang::rethrow_located(e, current_statement_begin__, prog_reader__());
@@ -3263,15 +3274,6 @@ public:
             param_name_stream__ << "aux" << '.' << k_0__;
             param_names__.push_back(param_name_stream__.str());
         }
-        param_name_stream__.str(std::string());
-        param_name_stream__ << "pos_b";
-        param_names__.push_back(param_name_stream__.str());
-        param_name_stream__.str(std::string());
-        param_name_stream__ << "pos_vars";
-        param_names__.push_back(param_name_stream__.str());
-        param_name_stream__.str(std::string());
-        param_name_stream__ << "pos_int";
-        param_names__.push_back(param_name_stream__.str());
     }
 
 
@@ -3322,15 +3324,6 @@ public:
             param_name_stream__ << "aux" << '.' << k_0__;
             param_names__.push_back(param_name_stream__.str());
         }
-        param_name_stream__.str(std::string());
-        param_name_stream__ << "pos_b";
-        param_names__.push_back(param_name_stream__.str());
-        param_name_stream__.str(std::string());
-        param_name_stream__ << "pos_vars";
-        param_names__.push_back(param_name_stream__.str());
-        param_name_stream__.str(std::string());
-        param_name_stream__ << "pos_int";
-        param_names__.push_back(param_name_stream__.str());
     }
 
 }; // model
