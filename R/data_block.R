@@ -1,8 +1,56 @@
-
+#------------------------------
+# Below are code chunks taken from the 'rstanarm' R package, obtained
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+# Copyright (C) 2015, 2016, 2017 Trustees of Columbia University
+# Copyright (C) 2016, 2017 Sam Brilleman
 
 #' @importFrom survival Surv
 #' @export
 survival::Surv
+
+
+# Check input argument is a valid type, and return as a list
+#
+# @param arg The user input to the argument
+# @param type A character vector of valid classes
+# @param validate_length The required length of the returned list
+# @return A list
+validate_arg <- function(arg, type, validate_length = NULL) {
+  nm <- deparse(substitute(arg))
+
+  if (inherits(arg, type)) {
+    # input type is valid, so return as a list
+    arg <- list(arg)
+  }
+  else if (is(arg, "list")) {
+    # input type is a list, check each element
+    check <- sapply(arg, function(x) inherits(x, type))
+    if (!all(check))
+      STOP_arg(nm, type)
+  }
+  else {
+    # input type is not valid
+    STOP_arg(nm, type)
+  }
+
+  if (!is.null(validate_length)) {
+    # return list of the specified length
+    if (length(arg) == 1L)
+      arg <- rep(arg, times = validate_length)
+    if (!length(arg) == validate_length)
+      stop2(nm, " is a list of the incorrect length.")
+  }
+
+  if ("data.frame" %in% type)
+    arg <- lapply(arg, as.data.frame)
+  if ("family" %in% type)
+    arg <- lapply(arg, validate_family)
+
+  arg
+}
+
 
 # Center a matrix x and return extra stuff
 #
@@ -421,3 +469,61 @@ summarize_jm_prior <-
 
     return(prior_list)
   }
+
+
+# Check the family and link function are supported by stan_{mvmer,jm}
+#
+# @param family A family object
+# @param supported_families A character vector of supported family names
+# @return A family object
+validate_famlink <- function(family, supported_families) {
+  famname <- family$family
+  fam <- which(supported_families == famname)
+  if (!length(fam))
+    stop2("'family' must be one of ", paste(supported_families, collapse = ", "))
+  supported_links <- supported_glm_links(famname)
+  link <- which(supported_links == family$link)
+  if (!length(link))
+    stop("'link' must be one of ", paste(supported_links, collapse = ", "))
+  return(family)
+}
+
+# @param famname string naming the family
+# @return character vector of supported link functions for the family
+supported_glm_links <- function(famname) {
+  switch(
+    famname,
+    binomial = c("logit", "probit", "cauchit", "log", "cloglog"),
+    gaussian = c("identity", "log", "inverse"),
+    Gamma = c("identity", "log", "inverse"),
+    inverse.gaussian = c("identity", "log", "inverse", "1/mu^2"),
+    "neg_binomial_2" = , # intentional
+    poisson = c("log", "identity", "sqrt"),
+    "Beta regression" = c("logit", "probit", "cloglog", "cauchit"),
+    stop("unsupported family")
+  )
+}
+
+
+# Check if the user input a list of priors for the longitudinal
+# submodel, and if not, then return the appropriate list
+#
+# @param prior The user input to the prior argument in the stan_mvmer
+#   or stan_jm call
+# @param M An integer specifying the number of longitudinal submodels
+broadcast_prior <- function(prior, M) {
+  if (is.null(prior)) {
+    return(rep(list(NULL), M))
+  }
+  else if ("dist" %in% names(prior)) {
+    return(rep(list(prior), M))
+  }
+  else if (is.list(prior) && length(prior) == M) {
+    return(prior)
+  }
+  else {
+    nm <- deparse(substitute(priorarg))
+    stop2(nm, " appears to provide prior information separately for the ",
+          "different submodels, but the list is of the incorrect length.")
+  }
+}

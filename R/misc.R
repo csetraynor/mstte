@@ -1,3 +1,9 @@
+#------------------------------
+# Below are code chunks taken from the 'rstanarm' R package, obtained
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+
 #------------ General
 # Check whether a vector/matrix/array contains an "(Intercept)"
 check_for_intercept <- function(x, logical = FALSE) {
@@ -220,6 +226,33 @@ validate_positive_scalar <- function(x, not_greater_than = NULL) {
     if (!all(x <= not_greater_than))
       stop(nm, " should less than or equal to ", not_greater_than, call. = FALSE)
   }
+}
+
+# Check family argument
+#
+# @param f The \code{family} argument specified by user (or the default).
+# @return If no error is thrown, then either \code{f} itself is returned (if
+#   already a family) or the family object created from \code{f} is returned (if
+#   \code{f} is a string or function).
+validate_family <- function(f) {
+  if (is.character(f))
+    f <- get(f, mode = "function", envir = parent.frame(2))
+  if (is.function(f))
+    f <- f()
+  if (!is(f, "family"))
+    stop("'family' must be a family.", call. = FALSE)
+
+  return(f)
+}
+
+
+# Throw error if any transition is not present in the dataset.
+#
+# @param x The long-format dataframe to test.
+# @param n number of transition
+validate_n_trans <- function(x, n){
+  if(!all(unique(x$trans) %in% seq_len(n)))
+    stop2("Attempted to estimate more transitions than found in the dataset, reconsider the model given your dataset.")
 }
 
 # Check if priors were autoscaled

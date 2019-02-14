@@ -268,23 +268,6 @@ loo.stanmstte <-
 
   }
 
-recommend_exact_loo <- function(reason) {
-  stop(
-    "'loo' is not supported if ", reason, ". ",
-    "If refitting the model 'nobs(x)' times is feasible, ",
-    "we recommend calling 'kfold' with K equal to the ",
-    "total number of observations in the data to perform exact LOO-CV.\n",
-    call. = FALSE
-  )
-}
-
-# chain_id to pass to loo::relative_eff
-chain_id_for_loo <- function(object) {
-  dims <- dim(object$stanfit)[1:2]
-  n_iter <- dims[1]
-  n_chain <- dims[2]
-  rep(1:n_chain, each = n_iter)
-}
 
 # get arguments needed for ll_fun
 # @param object stanmstte object
@@ -768,7 +751,33 @@ ll_fun <- function(x, m = NULL) {
   return(ll)
 }
 
-#-------------
+#------------- internal
+#------------------------------
+# Below are code chunks taken from the 'rstanarm' R package, obtained
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+# Copyright (C) 2015, 2016, 2017 Trustees of Columbia University
+
+
+recommend_exact_loo <- function(reason) {
+  stop(
+    "'loo' is not supported if ", reason, ". ",
+    "If refitting the model 'nobs(x)' times is feasible, ",
+    "we recommend calling 'kfold' with K equal to the ",
+    "total number of observations in the data to perform exact LOO-CV.\n",
+    call. = FALSE
+  )
+}
+
+# chain_id to pass to loo::relative_eff
+chain_id_for_loo <- function(object) {
+  dims <- dim(object$stanfit)[1:2]
+  n_iter <- dims[1]
+  n_chain <- dims[2]
+  rep(1:n_chain, each = n_iter)
+}
+
 
 # for each transition
 .xdata_surv <- function(data) {
