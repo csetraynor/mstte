@@ -74,12 +74,21 @@ uapply <- function(X, FUN, ...) {
   unlist(lapply(X, FUN, ...))
 }
 
-# Unlist the result from an lapply call not recursive
+# Unlist the result from an lapply call with recursive = FALSE
 #
 # @param X,FUN,... Same as lapply
 nonrecuapply <- function(X, FUN, ...) {
   unlist(lapply(X, FUN, ...), recursive = FALSE)
 }
+
+# A refactored version of mapply with SIMPLIFY = FALSE
+#
+# @param FUN,... Same as mapply
+# @param arg Passed to MoreArgs
+xapply <- function(..., FUN, args = NULL) {
+  mapply(FUN, ..., MoreArgs = args, SIMPLIFY = FALSE)
+}
+
 
 # Stop without printing call
 stop2    <- function(...) stop(..., call. = FALSE)
@@ -109,9 +118,54 @@ ai <- function(x, ...) as.integer(x, ...)
 ad <- function(x, ...) as.double (x, ...)
 am <- function(x, ...) as.matrix (x, ...)
 aa <- function(x, ...) as.array  (x, ...)
+uu <- function(x, ...) unique(unlist(x, ...))
 # Safe deparse
 safe_deparse <- function(expr) deparse(expr, 500L)
 
+# Transpose function that can handle NULL objects
+#
+# @param x A matrix, a vector, or otherwise (e.g. NULL)
+transpose <- function(x) {
+  if (is.matrix(x) || is.vector(x)) {
+    t(x)
+  } else {
+    x
+  }
+}
+
+
+# If x is NULL then return an empty object of the specified 'type'
+#
+# @param x An object to test whether it is null.
+# @param type The type of empty object to return if x is null.
+convert_null <- function(x, type = c("double", "integer", "matrix",
+                                     "arraydouble", "arrayinteger")) {
+  if (!is.null(x)) {
+    return(x)
+  } else if (type == "double") {
+    return(double(0))
+  } else if (type == "integer") {
+    return(integer(0))
+  } else if (type == "matrix") {
+    return(matrix(0,0,0))
+  } else if (type == "arraydouble") {
+    return(as.array(double(0)))
+  } else if (type == "arrayinteger") {
+    return(as.array(integer(0)))
+  } else {
+    stop("Input type not valid.")
+  }
+}
+# Translate group/factor IDs into integer values
+#
+# @param x A vector of group/factor IDs
+groups <- function(x) {
+  if (!is.null(x)) {
+    as.integer(as.factor(x))
+  } else {
+    x
+  }
+}
 
 # If a is NULL (and Inf, respectively) return b, otherwise just return a
 # @param a,b Objects
@@ -134,6 +188,41 @@ get_basehaz <- function(x, ind) {
   if (is.stanmstte(x))
     return(x$basehaz[[ind]])
   stop("Bug found: could not find basehaz.")
+}
+
+# Return the names for the coefficients
+get_beta_name_ymod <- function(x) {
+  nms <- colnames(x$x$xtemp)
+  if (!is.null(nms)) paste0(x$stub, "|", nms) else NULL
+}
+
+get_aux_name_ymod <- function(x, ...) {
+  switch(x$family$family,
+         gaussian         = paste0(x$stub, "|sigma"),
+         Gamma            = paste0(x$stub, "|shape"),
+         inverse.gaussian = paste0(x$stub, "|lambda"),
+         neg_binomial_2   = paste0(x$stub, "|reciprocal_dispersion"),
+         NULL)
+}
+
+get_int_name_ymod <- function(x, ...) {
+  if (x$intercept_type$number) paste0(x$stub, "|(Intercept)") else NULL
+}
+
+# Return the name for the mean_PPD
+get_ppd_name <- function(x, ...) {
+  paste0(x$stub, "|mean_PPD")
+}
+
+# Add the variables in ...'s to the RHS of a model formula
+#
+# @param x A model formula.
+# @param ... Character strings, the variable names.
+addto_formula <- function(x, ...) {
+  rhs_terms   <- terms(reformulate_rhs(rhs(x)))
+  intercept   <- attr(rhs_terms, "intercept")
+  term_labels <- attr(rhs_terms, "term.labels")
+  reformulate(c(term_labels, c(...)), response = lhs(x), intercept = intercept)
 }
 
 # Get the posterior sample size
@@ -209,6 +298,15 @@ check_trans <- function(f, t){
   }
 }
 
+# Consistent error message when binomial models with greater than
+# one trial are not allowed
+#
+STOP_binomial <- function() {
+  stop2("Binomial models with number of trials greater than one ",
+        "are not allowed (i.e. only bernoulli models are allowed).")
+}
+
+
 # Throw error if parameter isn't a positive scalar
 #
 # @param x The object to test.
@@ -228,6 +326,70 @@ validate_positive_scalar <- function(x, not_greater_than = NULL) {
   }
 }
 
+# Verify that outcome values match support implied by family object
+#
+# @param y outcome variable
+# @param family family object
+# @return y (possibly slightly modified) unless an error is thrown
+#
+validate_glm_outcome_support <- function(y, family) {
+  .is_count <- function(x) {
+    all(x >= 0) && all(abs(x - round(x)) < .Machine$double.eps^0.5)
+  }
+
+  fam <- family$family
+
+  if (!is.binomial(fam)) {
+    # make sure y has ok dimensions (matrix only allowed for binomial models)
+    if (length(dim(y)) > 1) {
+      if (NCOL(y) == 1) {
+        y <- y[, 1]
+      } else {
+        stop("Except for binomial models the outcome variable ",
+             "should not have multiple columns.",
+             call. = FALSE)
+      }
+    }
+
+    # check that values match support for non-binomial models
+    if (is.gaussian(fam)) {
+      return(y)
+    } else if (is.gamma(fam) && any(y <= 0)) {
+      stop("All outcome values must be positive for gamma models.",
+           call. = FALSE)
+    } else if (is.ig(fam) && any(y <= 0)) {
+      stop("All outcome values must be positive for inverse-Gaussian models.",
+           call. = FALSE)
+    } else if (is.poisson(fam) && !.is_count(y)) {
+      stop("All outcome values must be counts for Poisson models",
+           call. = FALSE)
+    } else if (is.nb(fam) && !.is_count(y)) {
+      stop("All outcome values must be counts for negative binomial models",
+           call. = FALSE)
+    }
+  } else { # binomial models
+    if (NCOL(y) == 1L) {
+      if (is.numeric(y) || is.logical(y))
+        y <- as.integer(y)
+      if (is.factor(y))
+        y <- fac2bin(y)
+      if (!all(y %in% c(0L, 1L)))
+        stop("All outcome values must be 0 or 1 for Bernoulli models.",
+             call. = FALSE)
+    } else if (isTRUE(NCOL(y) == 2L)) {
+      if (!.is_count(y))
+        stop("All outcome values must be counts for binomial models.",
+             call. = FALSE)
+    } else {
+      stop("For binomial models the outcome should be a vector or ",
+           "a matrix with 2 columns.",
+           call. = FALSE)
+    }
+  }
+
+  return(y)
+}
+
 # Check family argument
 #
 # @param f The \code{family} argument specified by user (or the default).
@@ -245,6 +407,32 @@ validate_family <- function(f) {
   return(f)
 }
 
+# Check if x and any objects in ... were all NULL or not
+#
+# @param x The first object to use in the comparison
+# @param ... Any additional objects to include in the comparison
+# @param error If TRUE then return an error if all objects aren't
+#   equal with regard to the 'is.null' test.
+# @return If error = TRUE, then an error if all objects aren't
+#   equal with regard to the 'is.null' test. Otherwise, a logical
+#   specifying whether all objects were equal with regard to the
+#   'is.null' test.
+supplied_together <- function(x, ..., error = FALSE) {
+  dots <- list(...)
+  for (i in dots) {
+    if (!identical(is.null(x), is.null(i))) {
+      if (error) {
+        nm_x <- deparse(substitute(x))
+        nm_i <- deparse(substitute(i))
+        stop2(nm_x, " and ", nm_i, " must be supplied together.")
+      } else {
+        return(FALSE) # not supplied together, ie. one NULL and one not NULL
+      }
+    }
+  }
+  return(TRUE) # supplied together, ie. all NULL or all not NULL
+}
+
 
 # Throw error if any transition is not present in the dataset.
 #
@@ -254,6 +442,15 @@ validate_n_trans <- function(x, n){
   if(!all(unique(x$trans) %in% seq_len(n)))
     stop2("Attempted to estimate more transitions than found in the dataset, reconsider the model given your dataset.")
 }
+
+# Function to check if the response vector is real or integer
+#
+# @param family A family object
+# @return A logical specify whether the response is real (TRUE) or integer (FALSE)
+check_response_real <- function(family) {
+  !(family$family %in% c("binomial", "poisson", "neg_binomial_2"))
+}
+
 
 # Check if priors were autoscaled
 #
@@ -265,6 +462,42 @@ check_if_rescaled <- function(prior_stuff, has, adjusted_prior_scale) {
   prior_stuff$prior_autoscale && has &&
     !is.na(prior_stuff$prior_dist_name) &&
     !all(prior_stuff$prior_scale == adjusted_prior_scale)
+}
+
+# Return a list (or vector if unlist = TRUE) which
+# contains the embedded elements in list x named y
+fetch <- function(x, y, z = NULL, zz = NULL, null_to_zero = FALSE,
+                  pad_length = NULL, unlist = FALSE) {
+  ret <- lapply(x, `[[`, y)
+  if (!is.null(z))
+    ret <- lapply(ret, `[[`, z)
+  if (!is.null(zz))
+    ret <- lapply(ret, `[[`, zz)
+  if (null_to_zero)
+    ret <- lapply(ret, function(i) ifelse(is.null(i), 0L, i))
+  if (!is.null(pad_length)) {
+    padding <- rep(list(0L), pad_length - length(ret))
+    ret <- c(ret, padding)
+  }
+  if (unlist) unlist(ret) else ret
+}
+
+# Wrapper for using fetch with unlist = TRUE and
+# returning array. Also converts logical to integer.
+fetch_array <- function(x, y, z = NULL, zz = NULL, null_to_zero = FALSE,
+                        pad_length = NULL) {
+  val <- fetch(x = x, y = y, z = z, zz = zz, null_to_zero = null_to_zero,
+               pad_length = pad_length, unlist = TRUE)
+  if (is.logical(val))
+    val <- as.integer(val)
+  as.array(val)
+}
+
+# Wrapper for using fetch with unlist = TRUE
+fetch_ <- function(x, y, z = NULL, zz = NULL, null_to_zero = FALSE,
+                   pad_length = NULL) {
+  fetch(x = x, y = y, z = z, zz = zz, null_to_zero = null_to_zero,
+        pad_length = pad_length, unlist = TRUE)
 }
 
 # Check that a stanfit object (or list returned by rstan::optimizing) is valid
@@ -291,6 +524,17 @@ is.stanmvreg <- function(x) inherits(x, "stanmvreg")
 is.stanjm    <- function(x) inherits(x, "stanjm")
 is.stanmstte <- function(x) inherits(x, "stanmstte")
 
+# Test for a given family
+#
+# @param x A character vector (probably x = family(fit)$family)
+is.binomial <- function(x) x == "binomial"
+is.gaussian <- function(x) x == "gaussian"
+is.gamma    <- function(x) x == "Gamma"
+is.ig       <- function(x) x == "inverse.gaussian"
+is.nb       <- function(x) x == "neg_binomial_2"
+is.poisson  <- function(x) x == "poisson"
+is.beta     <- function(x) x == "beta" || x == "Beta regression"
+
 # Test for a given estimation method
 #
 # @param x A stanreg object.
@@ -303,6 +547,9 @@ used.sampling <- function(x) {
 used.variational <- function(x) {
   x$algorithm %in% c("meanfield", "fullrank")
 }
+
+# Invert 'is.null'
+not.null <- function(x) { !is.null(x) }
 
 # loo internal ----------------------------------------------------------------
 validate_k_threshold <- function(k) {
@@ -1618,4 +1865,66 @@ default_stan_control <- function(prior, adapt_delta = NULL,
                           0.95) # default
   }
   nlist(adapt_delta, max_treedepth)
+}
+
+# Convert a standardised quadrature node to an unstandardised value based on
+# the specified integral limits
+#
+# @param x An unstandardised quadrature node
+# @param a The lower limit(s) of the integral, possibly a vector
+# @param b The upper limit(s) of the integral, possibly a vector
+unstandardise_qpts <- function(x, a, b) {
+  if (!identical(length(x), 1L) || !is.numeric(x))
+    stop("'x' should be a single numeric value.", call. = FALSE)
+  if (!all(is.numeric(a), is.numeric(b)))
+    stop("'a' and 'b' should be numeric.", call. = FALSE)
+  if (!length(a) %in% c(1L, length(b)))
+    stop("'a' and 'b' should be vectors of length 1, or, be the same length.", call. = FALSE)
+  if (any((b - a) < 0))
+    stop("The upper limits for the integral ('b' values) should be greater than ",
+         "the corresponding lower limits for the integral ('a' values).", call. = FALSE)
+  ((b - a) / 2) * x + ((b + a) / 2)
+}
+
+# Convert a standardised quadrature weight to an unstandardised value based on
+# the specified integral limits
+#
+# @param x An unstandardised quadrature weight
+# @param a The lower limit(s) of the integral, possibly a vector
+# @param b The upper limit(s) of the integral, possibly a vector
+unstandardise_qwts <- function(x, a, b) {
+  if (!identical(length(x), 1L) || !is.numeric(x))
+    stop("'x' should be a single numeric value.", call. = FALSE)
+  if (!all(is.numeric(a), is.numeric(b)))
+    stop("'a' and 'b' should be numeric.", call. = FALSE)
+  if (!length(a) %in% c(1L, length(b)))
+    stop("'a' and 'b' should be vectors of length 1, or, be the same length.", call. = FALSE)
+  if (any((b - a) < 0))
+    stop("The upper limits for the integral ('b' values) should be greater than ",
+         "the corresponding lower limits for the integral ('a' values).", call. = FALSE)
+  ((b - a) / 2) * x
+}
+
+
+# Replicate rows of a matrix or data frame
+#
+# @param x A matrix or data frame.
+# @param ... Arguments passed to 'rep', namely 'each' or 'times'.
+rep_rows <- function(x, ...) {
+  if (is.null(x) || !nrow(x)) {
+    return(x)
+  } else if (is.matrix(x) || is.data.frame(x)) {
+    x <- x[rep(1:nrow(x), ...), , drop = FALSE]
+  } else {
+    stop2("'x' must be a matrix or data frame.")
+  }
+  x
+}
+
+
+# Promote a character variable to a factor
+#
+# @param x The variable to potentially promote
+promote_to_factor <- function(x) {
+  if (is.character(x)) as.factor(x) else x
 }

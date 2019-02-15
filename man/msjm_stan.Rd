@@ -4,14 +4,15 @@
 \alias{msjm_stan}
 \title{Bayesian joint longitudinal and multi-state models via Stan}
 \usage{
-msjm_stan(formulaLong, dataLong, formulaMs, dataMs, time_var, n_trans,
-  id_var, family = gaussian, assoc = "etavalue", lag_assoc = 0,
-  grp_assoc, epsilon = 1e-05, basehaz = c("bs", "weibull",
-  "piecewise"), basehaz_ops, qnodes = 15, init = "prefit", weights,
-  priorLong = normal(), priorLong_intercept = normal(),
-  priorLong_aux = cauchy(0, 5), priorEvent = normal(),
+msjm_stan(formulaLong, dataLong, formulaMs, dataMs, time_var = "time",
+  time_start = "Tstart", n_trans, id_var, family = gaussian,
+  assoc = "etavalue", lag_assoc = 0, grp_assoc, epsilon = 1e-05,
+  basehaz = c("bs", "weibull", "piecewise"), basehaz_ops, qnodes = 15,
+  init = "prefit", weights, priorLong = rstanarm::normal(),
+  priorLong_intercept = rstanarm::normal(),
+  priorLong_aux = rstanarm::cauchy(0, 5), priorEvent = normal(),
   priorEvent_intercept = normal(), priorEvent_aux = cauchy(),
-  priorEvent_assoc = normal(), prior_covariance = lkj(),
+  priorEvent_assoc = normal(), prior_covariance = rstanarm::lkj(),
   prior_PD = FALSE, algorithm = c("sampling", "meanfield", "fullrank"),
   adapt_delta = 0.99, max_treedepth = 10L, QR = FALSE,
   sparse = FALSE, ...)

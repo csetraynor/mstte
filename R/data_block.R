@@ -527,3 +527,1086 @@ broadcast_prior <- function(prior, M) {
           "different submodels, but the list is of the incorrect length.")
   }
 }
+
+# Construct a list with information about the longitudinal submodel
+#
+# @param formula The model formula for the glmer submodel.
+# @param data The data for the glmer submodel.
+# @param family The family object for the glmer submodel.
+# @return A named list with the following elements:
+#   y: named list with the reponse vector and related info.
+#   x: named list with the fe design matrix and related info.
+#   z: named list with the re design matrices and related info.
+#   terms: the model.frame terms object with bars "|" replaced by "+".
+#   model_frame: The model frame with all variables used in the
+#     model formula.
+#   formula: The model formula.
+#   reTrms: returned by lme4::glFormula$reTrms.
+#   family: the (modified) family object for the glmer submodel.
+#   intercept_type: named list with info about the type of
+#     intercept required for the glmer submodel.
+#   has_aux: logical specifying whether the glmer submodel
+#     requires an auxiliary parameter.
+handle_y_mod <- function(formula, data, family, stub) {
+  mf <- stats::model.frame(lme4::subbars(formula), data)
+  if (!length(formula) == 3L)
+    stop2("An outcome variable must be specified.")
+
+  # lme4 parts
+  lme4_parts <- lme4::glFormula(formula, data)
+  reTrms <- lme4_parts$reTrms
+
+  # Response vector, design matrices
+  y <- make_y_for_stan(formula, mf, family)
+  x <- make_x_for_stan(formula, mf)
+  z <- make_z_for_stan(formula, mf)
+
+  # Terms
+  terms <- attr(mf, "terms")
+  terms <- append_predvars_attribute(terms, formula, data)
+
+  # Binomial with >1 trials not allowed by stan_{mvmver,jm}
+  is_binomial <- is.binomial(family$family)
+  is_bernoulli <- is_binomial && NCOL(y$y) == 1L && all(y$y %in% 0:1)
+  if (is_binomial && !is_bernoulli)
+    STOP_binomial()
+
+  # Various flags
+  intercept_type <- check_intercept_type(x, family)
+  has_aux <- check_for_aux(family)
+  family <- append_mvmer_famlink(family, is_bernoulli)
+
+  nlist(y, x, z, reTrms, model_frame = mf, formula, terms,
+        family, intercept_type, has_aux, stub)
+}
+
+# Construct a list with information about the multi-state submodel(s)
+#
+# @param formula The model formula for the event submodel
+# @param data The data for the event submodel
+# @param qnodes An integer specifying the number of GK quadrature nodes
+# @param id_var The name of the ID variable
+# @param y_id_list A character vector with a unique list of subject IDs
+#   (factor levels) that appeared in the longitudinal submodels
+# @return A named list with the following elements:
+#   mod: The fitted Cox model.
+#   entrytime: Named vector of numeric entry times.
+#   eventtime: Named vector of numeric event times.
+#   status: Named vector of event/failure indicators.
+#   Npat: Number of individuals.
+#   Nevents: Total number of events/failures.
+#   id_list: A vector of unique subject IDs, as a factor.
+#   qnodes: The number of GK quadrature nodes.
+#   qwts,qpts: Vector of unstandardised quadrature weights and points.
+#     The vector is ordered such that the first Npat items are the
+#     weights/locations of the first quadrature point, then the second
+#     Npat items are the weights/locations for the second quadrature
+#     point, and so on.
+#   qids: The subject IDs corresponding to each element of qwts/qpts.
+#   epts: The event times, but only for individuals who were NOT censored
+#     (i.e. those individual who had an event).
+#   eids: The subject IDs corresponding to each element of epts.
+#   cpts: Combined vector of failure and quadrature times: c(epts, qpts).
+#   cids: Combined vector subject IDs: c(eids, qids).
+#   Xq: The model matrix for the event submodel, centred and no intercept.
+#   Xbar: Vector of column means for the event submodel model matrix.
+#   K: Number of predictors for the event submodel.
+#   norm_const: Scalar, the constant used to shift the event submodel
+#     linear predictor (equal to the log of the mean incidence rate).
+#   model_frame: The model frame for the fitted Cox model, but with the
+#     subject ID variable also included.
+#   tvc: Logical, if TRUE then a counting type Surv() object was used
+#     in the fitted Cox model (ie. time varying covariates).
+handle_ms_mod <- function(formula, data, meta) {
+
+  if (!requireNamespace("survival"))
+    stop("the 'survival' package must be installed to use this function")
+  if (!requireNamespace("data.table"))
+    stop("the 'data.table' package must be installed to use this function")
+
+  id_var      <- meta$id_var
+  id_list     <- meta$id_list
+  time_start  <- meta$time_start
+  qnodes      <- meta$qnodes
+  basehaz     <- meta$basehaz
+  basehaz_ops <- meta$basehaz_ops
+
+  # parse formula, create model data & frame
+  formula2  <- lapply(formula, function(f) addto_formula(f$formula, id_var)) # includes id_var
+
+  mf_stuff <-  lapply(seq_along(formula2), function(i) {
+    make_model_frame(formula2[[i]], data[[i]])
+  })
+
+  mf <- lapply(mf_stuff, function(m) m$mf)   # model frame
+  mt <- lapply(mf_stuff, function(m) m$mt)  # model terms
+
+  for(i in seq_along(mf)){
+    mf[[i]][[id_var]] <- promote_to_factor(mf[[i]][[id_var]]) # same as lme4
+  }
+
+  ids <- lapply(mf, function(mf) factor(mf[[id_var]]) )
+
+  # error checks for the id variable
+  validate_jm_ids(y_ids = id_list, e_ids = uu(ids) )
+
+  # entry and exit times for each row of data
+  t_beg <- lapply(mf, function(m) make_t(m, type = "beg") ) # entry time
+  t_end <- lapply(mf, function(m) make_t(m, type = "end") ) # exit time
+  t_upp <- lapply(mf, function(m) make_t(m, type = "upp") ) # upper time for
+
+  # ensure no event or censoring times are zero (leads to degenerate
+  # estimate for log hazard for most baseline hazards, due to log(0))
+
+  for(i in seq_along(t_end ) ){
+    check1 <- any(t_end[[i]] <= 0, na.rm = TRUE)
+    if (check1)
+      stop2("All event and censoring times must be greater than 0.")
+  }
+
+  # event indicator for each row of data
+  d <- lapply(mf, make_d)
+
+  for(i in seq_along(status)){
+    if (any(status[[i]] < 0 || status[[i]] > 3))
+      stop2("Invalid status indicator in formula.")
+  }
+
+  event <- lapply(d, function(d) as.logical(d == 1) )
+  rcens <- lapply(d, function(d) as.logical(d == 0) )
+  lcens <- lapply(d, function(d) as.logical(d == 2) )
+  icens <- lapply(d, function(d) as.logical(d == 3) )
+
+  # delayed entry indicator for each row of data
+  delayed  <- lapply(t_beg, function(t_beg) as.logical(!t_beg == 0) )
+
+  # time variables for stan
+  # time variables for stan
+  t_event <- lapply(seq_along(t_end), function(t)
+    t_end[[t]][status[[t]] == 1] )  # exact event time
+  t_rcens <- lapply(seq_along(t_end), function(t)
+    t_end[[t]][status[[t]] == 0] ) # right censoring time
+  t_lcens <- lapply(seq_along(t_end),  function(t)
+    t_end[[t]][status[[t]] == 2] ) # left censoring time
+  t_icenl <- lapply(seq_along(t_end),  function(t)
+    t_end[[t]][status[[t]] == 3] ) # lower limit of interval censoring time
+  t_icenu <- lapply(seq_along(t_upp), function(t)
+    t_upp[[t]][status[[t]] == 3] ) # upper limit of interval censoring time
+  t_delay <- lapply(seq_along(t_beg),  function(t)
+    t_beg[[t]][delayed[[t]]] )
+
+
+  # entry and exit times for each individual
+  t_tmp <- t_end
+  entrytime <- list(); eventtime <- list();
+  for(i in seq_along(t_tmp)){
+    t_tmp[[i]][icens[[i]]] <- t_upp[[i]][icens[[i]]]
+    entrytime[[i]] <- tapply(t_beg[[i]], ids[[i]], min)
+    eventtime[[i]] <- tapply(t_tmp[[i]], ids[[i]], max)
+    status[[i]]    <- tapply(d[[i]],     ids[[i]], max)
+  }
+
+  # dimensions
+  nevent <- lapply(status, function(s)  sum(s == 1))
+  nrcens <- lapply(status,  function(s) sum(s == 0))
+  nlcens <- lapply(status, function(s) sum(s == 2))
+  nicens <- lapply(status, function(s) sum(s == 3))
+  ndelay <- lapply(delayed, function(d) sum(d))
+
+  # baseline hazard
+  ok_basehaz <- c("weibull", "bs", "piecewise")
+  ok_basehaz_ops <- lapply(basehaz, function(b) get_ok_basehaz_ops(b))
+
+  basehaz <- lapply(seq_along(basehaz), function(b)
+    SW( handle_basehaz_surv(basehaz = basehaz[[b]],
+                            basehaz_ops = basehaz_ops[[b]],
+                            ok_basehaz = ok_basehaz,
+                            ok_basehaz_ops = ok_basehaz_ops[[b]],
+                            times = t_end[[b]],
+                            status = event[[b]],
+                            min_t = min(t_beg[[b]]),
+                            max_t = max(c(t_end[[b]], t_upp[[b]]), na.rm = TRUE ) )
+    ))
+
+  nvars <- lapply(basehaz, function(b) b$nvars)  # number of basehaz aux parameters
+  # flag if intercept is required for baseline hazard
+  has_intercept   <- lapply(basehaz, function(b) ai(has_intercept(b)) )
+
+  nvars <- basehaz$nvars # number of basehaz aux parameters
+
+  # flag if intercept is required for baseline hazard
+  has_intercept <- ai(has_intercept(basehaz))
+
+  # standardised weights and nodes for quadrature
+  qq <- lapply(qnodes, get_quadpoints)
+  qp <- lapply(qq, function(qq) qq$points)
+  qw <- lapply(qq, function(qq) qq$weights)
+
+  # quadrature points & weights, evaluated for each row of data
+  qpts_event <- list()
+  qpts_lcens <- list()
+  qpts_rcens <- list()
+  qpts_icenl <- list()
+  qpts_icenu <- list()
+  qpts_delay <- list()
+
+  qwts_event <- list()
+  qwts_lcens <- list()
+  qwts_rcens <- list()
+  qwts_icenl <- list()
+  qwts_icenu <- list()
+  qwts_delay <- list()
+
+  for(i in seq_along(qq)){
+    qp_i = qp[[i]]
+    qw_i = qw[[i]]
+    qpts_event[[i]] <- uapply(qp_i,unstandardise_qpts, 0, t_event[[i]])
+    qpts_lcens[[i]] <- uapply(qp_i,unstandardise_qpts, 0, t_lcens[[i]])
+    qpts_rcens[[i]] <- uapply(qp_i,unstandardise_qpts, 0, t_rcens[[i]])
+    qpts_icenl[[i]] <- uapply(qp_i,unstandardise_qpts, 0, t_icenl[[i]])
+    qpts_icenu[[i]] <- uapply(qp_i,unstandardise_qpts, 0, t_icenu[[i]])
+    qpts_delay[[i]] <- uapply(qp_i,unstandardise_qpts, 0, t_delay[[i]])
+
+    qwts_event[[i]] <- uapply(qw_i, unstandardise_qwts, 0, t_event[[i]])
+    qwts_lcens[[i]] <- uapply(qw_i, unstandardise_qwts, 0, t_lcens[[i]])
+    qwts_rcens[[i]] <- uapply(qw_i, unstandardise_qwts, 0, t_rcens[[i]])
+    qwts_icenl[[i]] <- uapply(qw_i, unstandardise_qwts, 0, t_icenl[[i]])
+    qwts_icenu[[i]] <- uapply(qw_i, unstandardise_qwts, 0, t_icenu[[i]])
+    qwts_delay[[i]] <- uapply(qw_i, unstandardise_qwts, 0, t_delay[[i]])
+  }
+
+
+  eids_event <- ids[event]
+  qids_event <- rep(ids[event],   times = qnodes)
+  qids_lcens <- rep(ids[lcens],   times = qnodes)
+  qids_rcens <- rep(ids[rcens],   times = qnodes)
+  qids_icens <- rep(ids[icens],   times = qnodes)
+  qids_delay <- rep(ids[delayed], times = qnodes)
+
+  # times at events and all quadrature points
+  cids <- c(eids_event,
+            qids_event,
+            qids_lcens,
+            qids_rcens,
+            qids_icens,
+            qids_icens,
+            qids_delay)
+  cpts_list <- list(t_event,
+                    qpts_event,
+                    qpts_lcens,
+                    qpts_rcens,
+                    qpts_icenl,
+                    qpts_icenu,
+                    qpts_delay)
+  idx_cpts <- get_idx_array(sapply(cpts_list, length))
+  cpts     <- unlist(cpts_list) # as vector for stan
+  len_cpts <- length(cpts)
+
+  # number of quadrature points
+  qevent <- length(qwts_event)
+  qlcens <- length(qwts_lcens)
+  qrcens <- length(qwts_rcens)
+  qicens <- length(qwts_icenl)
+  qdelay <- length(qwts_delay)
+
+  # basis terms for baseline hazard
+  basis_cpts <- make_basis(cpts, basehaz)
+
+  # predictor matrices
+  x <- make_x(formula$tf_form, mf)$x
+  x_event <- keep_rows(x, d == 1)
+  x_lcens <- keep_rows(x, d == 2)
+  x_rcens <- keep_rows(x, d == 0)
+  x_icens <- keep_rows(x, d == 3)
+  x_delay <- keep_rows(x, delayed)
+  K <- ncol(x)
+  x_cpts <- rbind(x_event,
+                  rep_rows(x_event, times = qnodes),
+                  rep_rows(x_lcens, times = qnodes),
+                  rep_rows(x_rcens, times = qnodes),
+                  rep_rows(x_icens, times = qnodes),
+                  rep_rows(x_delay, times = qnodes))
+
+  # fit a cox model
+  if (formula$surv_type %in% c("right", "counting")) {
+    mod <- survival::coxph(formula$formula, data = data, x = TRUE)
+  } else if (formula$surv_type %in% c("interval", "interval2")) {
+    mod <- survival::survreg(formula$formula, data = data, x = TRUE)
+  } else {
+    stop("Bug found: Invalid Surv type.")
+  }
+
+  # calculate mean log incidence, used as a shift in log baseline hazard
+  norm_const <- log(nevent / sum(eventtime - entrytime))
+
+  nlist(mod,
+        surv_type = formula$surv_type,
+        qnodes,
+        basehaz,
+        has_intercept,
+        has_icens = as.logical(nicens),
+        model_frame = mf,
+        entrytime,
+        eventtime,
+        d, status,
+        norm_const,
+        t_beg,
+        t_end,
+        t_upp,
+        t_event,
+        t_rcens,
+        t_lcens,
+        t_icenl,
+        t_icenu,
+        t_delay,
+        time_start,
+        nevent,
+        nlcens,
+        nrcens,
+        nicens,
+        ndelay,
+        qevent,
+        qlcens,
+        qrcens,
+        qicens,
+        qdelay,
+        cids,
+        cpts,
+        len_cpts,
+        idx_cpts,
+        qwts_event,
+        qwts_lcens,
+        qwts_rcens,
+        qwts_icenl,
+        qwts_icenu,
+        qwts_delay,
+        eids_event,
+        qids_event,
+        qids_lcens,
+        qids_rcens,
+        qids_icens,
+        qids_delay,
+        x,
+        x_cpts,
+        basis_cpts,
+        x_bar = colMeans(x),
+        K)
+}
+
+# Construct a list with information about the baseline hazard
+#
+# @param basehaz A string specifying the type of baseline hazard
+# @param basehaz_ops A named list with elements df, knots
+# @param ok_basehaz A list of admissible baseline hazards
+# @param times A numeric vector with eventtimes for each individual
+# @param status A numeric vector with event indicators for each individual
+# @param min_t Scalar, the minimum entry time across all individuals
+# @param max_t Scalar, the maximum event or censoring time across all individuals
+# @return A named list with the following elements:
+#   type: integer specifying the type of baseline hazard, 1L = weibull,
+#     2L = b-splines, 3L = piecewise.
+#   type_name: character string specifying the type of baseline hazard.
+#   user_df: integer specifying the input to the df argument
+#   df: integer specifying the number of parameters to use for the
+#     baseline hazard.
+#   knots: the knot locations for the baseline hazard.
+#   bs_basis: The basis terms for the B-splines. This is passed to Stan
+#     as the "model matrix" for the baseline hazard. It is also used in
+#     post-estimation when evaluating the baseline hazard for posterior
+#     predictions since it contains information about the knot locations
+#     for the baseline hazard (this is implemented via splines::predict.bs).
+handle_basehaz <- function(basehaz,
+                           basehaz_ops,
+                           ok_basehaz     = c("weibull", "bs", "piecewise"),
+                           ok_basehaz_ops = c("df", "knots"),
+                           times,
+                           status,
+                           min_t, max_t) {
+
+  if (!basehaz %in% ok_basehaz)
+    stop2("'basehaz' should be one of: ", comma(ok_basehaz))
+
+  if (!all(names(basehaz_ops) %in% ok_basehaz_ops))
+    stop2("'basehaz_ops' can only include: ", comma(ok_basehaz_ops))
+
+  if (basehaz == "exp") {
+
+    bknots <- NULL # boundary knot locations
+    iknots <- NULL # internal knot locations
+    basis  <- NULL # spline basis
+    nvars  <- 0L   # number of aux parameters, none
+
+  } else if (basehaz == "gompertz") {
+
+    bknots <- NULL # boundary knot locations
+    iknots <- NULL # internal knot locations
+    basis  <- NULL # spline basis
+    nvars  <- 1L   # number of aux parameters, Gompertz scale
+
+  } else if (basehaz == "weibull") {
+
+    bknots <- NULL # boundary knot locations
+    iknots <- NULL # internal knot locations
+    basis  <- NULL # spline basis
+    nvars  <- 1L   # number of aux parameters, Weibull shape
+
+  } else if (basehaz == "bs") {
+
+    df    <- basehaz_ops$df
+    knots <- basehaz_ops$knots
+
+    if (!is.null(df) && !is.null(knots))
+      stop2("Cannot specify both 'df' and 'knots' for the baseline hazard.")
+
+    if (is.null(df))
+      df <- 5L # default df for B-splines, assuming no intercept
+    # NB this is ignored if the user specified knots
+
+    tt <- times[status == 1] # uncensored event times
+    if (is.null(knots) && !length(tt)) {
+      warning2("No observed events found in the data. Censoring times will ",
+               "be used to evaluate default knot locations for splines.")
+      tt <- times
+    }
+
+    bknots <- c(min_t, max_t)
+    iknots <- get_iknots(tt, df = df, iknots = knots)
+    basis  <- get_basis(tt, iknots = iknots, bknots = bknots, type = "bs")
+    nvars  <- ncol(basis)  # number of aux parameters, basis terms
+
+  } else if (basehaz == "ms") {
+
+    df    <- basehaz_ops$df
+    knots <- basehaz_ops$knots
+
+    if (!is.null(df) && !is.null(knots)) {
+      stop2("Cannot specify both 'df' and 'knots' for the baseline hazard.")
+    }
+
+    tt <- times[status == 1] # uncensored event times
+    if (is.null(df)) {
+      df <- 5L # default df for B-splines, assuming no intercept
+      # NB this is ignored if the user specified knots
+    }
+
+    tt <- times[status == 1] # uncensored event times
+    if (is.null(knots) && !length(tt)) {
+      warning2("No observed events found in the data. Censoring times will ",
+               "be used to evaluate default knot locations for splines.")
+      tt <- times
+    }
+
+    bknots <- c(min_t, max_t)
+    iknots <- get_iknots(tt, df = df, iknots = knots)
+    basis  <- get_basis(tt, iknots = iknots, bknots = bknots, type = "ms")
+    nvars  <- ncol(basis)  # number of aux parameters, basis terms
+
+  } else if (basehaz == "piecewise") {
+
+    df    <- basehaz_ops$df
+    knots <- basehaz_ops$knots
+
+    if (!is.null(df) && !is.null(knots)) {
+      stop2("Cannot specify both 'df' and 'knots' for the baseline hazard.")
+    }
+
+    if (is.null(df)) {
+      df <- 6L # default number of segments for piecewise constant
+      # NB this is ignored if the user specified knots
+    }
+
+    if (is.null(knots) && !length(tt)) {
+      warning2("No observed events found in the data. Censoring times will ",
+               "be used to evaluate default knot locations for piecewise basehaz.")
+      tt <- times
+    }
+
+    bknots <- c(min_t, max_t)
+    iknots <- get_iknots(tt, df = df, iknots = knots)
+    basis  <- NULL               # spline basis
+    nvars  <- length(iknots) + 1 # number of aux parameters, dummy indicators
+
+  }
+
+  nlist(type_name = basehaz,
+        type = basehaz_for_stan(basehaz),
+        nvars,
+        iknots,
+        bknots,
+        basis,
+        df = nvars,
+        user_df = nvars,
+        knots = if (basehaz == "bs") iknots else c(bknots[1], iknots, bknots[2]),
+        bs_basis = basis)
+}
+
+# Append a family object with numeric family and link information used by Stan
+#
+# @param family The existing family object
+# @param is_bernoulli Logical specifying whether the family should be bernoulli
+# @return A family object with two appended elements:
+#   mvmer_family: an integer telling Stan which family
+#   mvmer_link: an integer telling Stan which link function (varies by family!)
+append_mvmer_famlink <- function(family, is_bernoulli = FALSE) {
+  famname <- family$family
+  family$mvmer_family <- switch(
+    famname,
+    gaussian = 1L,
+    Gamma = 2L,
+    inverse.gaussian = 3L,
+    binomial = 5L, # bernoulli = 4L changed later
+    poisson = 6L,
+    "neg_binomial_2" = 7L)
+  if (is_bernoulli)
+    family$mvmer_family <- 4L
+  supported_links <- supported_glm_links(famname)
+  link <- which(supported_links == family$link)
+  family$mvmer_link <- link
+  return(family)
+}
+
+
+# Function to check if the submodel should include a auxiliary term
+#
+# @param family A family object
+# @return A logical specify whether the submodel includes a auxiliary term
+check_for_aux <- function(family) {
+  !(family$family %in% c("binomial", "poisson"))
+}
+
+
+#--------------- Functions related to longitudinal submodel
+
+# Return the response vector for passing to Stan
+#
+# @param formula The model formula
+# @param model_frame The model frame
+# @param family A family object
+# @return A named list with the following elements:
+#   y: the response vector
+#   real: the response vector if real, else numeric(0)
+#   integer: the response vector if integer, else integer(0)
+#   resp_type: 1L if response is real, 2L is response is integer
+make_y_for_stan <- function(formula, model_frame, family) {
+  y <- as.vector(model.response(model_frame))
+  y <- validate_glm_outcome_support(y, family)
+  resp_type <- if (check_response_real(family)) 1L else 2L
+  real    <- if (resp_type == 1L) y else numeric(0)
+  integer <- if (resp_type == 2L) y else integer(0)
+  nlist(y, real, integer, resp_type)
+}
+
+# Return the design matrix for passing to Stan
+#
+# @param formula The model formula.
+# @param model_frame The model frame.
+# @return A named list with the following elements:
+#   x: the fe model matrix, not centred and may have intercept.
+#   xtemp: fe model matrix, centred and no intercept.
+#   x_form: the formula for the fe model matrix.
+#   x_bar: the column means of the model matrix.
+#   has_intercept: logical for whether the submodel has an intercept
+#   N,K: number of rows (observations) and columns (predictors) in the
+#     fixed effects model matrix
+make_x_for_stan <- function(formula, model_frame) {
+  x_form <- lme4::nobars(formula)
+  x <- model.matrix(x_form, model_frame)
+  has_intercept <- check_for_intercept(x, logical = TRUE)
+  xtemp <- drop_intercept(x)
+  x_bar <- colMeans(xtemp)
+  xtemp <- sweep(xtemp, 2, x_bar, FUN = "-")
+  # identify any column of x with < 2 unique values (empty interaction levels)
+  sel <- (2 > apply(xtemp, 2L, function(x) length(unique(x))))
+  if (any(sel))
+    stop2("Cannot deal with empty interaction levels found in columns: ",
+          paste(colnames(xtemp)[sel], collapse = ", "))
+  nlist(x, xtemp, x_form, x_bar, has_intercept, N = NROW(xtemp), K = NCOL(xtemp))
+}
+
+# Split the random effects part of a model formula into
+#   - the formula part (ie. the formula on the LHS of "|"), and
+#   - the name of the grouping factor (ie. the variable on the RHS of "|")
+#
+# @param x Random effects part of a model formula, as returned by lme4::findbars
+# @return A named list with the following elements:
+#   re_form: a formula specifying the random effects structure
+#   group_var: the name of the grouping factor
+split_at_bars <- function(x) {
+  terms <- strsplit(deparse(x, 500), "\\s\\|\\s")[[1L]]
+  if (!length(terms) == 2L)
+    stop2("Could not parse the random effects formula.")
+  re_form <- formula(paste("~", terms[[1L]]))
+  group_var <- terms[[2L]]
+  nlist(re_form, group_var)
+}
+
+# Return design matrices for the group level terms for passing to Stan
+#
+# @param formula The model formula
+# @param model_frame The model frame
+# @return A named list with the following elements:
+#   z: a list with each element containing the random effects model
+#     matrix for one grouping factor.
+#   z_forms: a list with each element containing the model formula for
+#     one grouping factor.
+#   group_vars: a character vector with the name of each of the
+#     grouping factors
+#   group_cnms: a list with each element containing the names of the
+#     group level parameters for one grouping factor
+#   group_list: a list with each element containing the vector of group
+#     IDs for the rows of z
+#   nvars: a vector with the number of group level parameters for each
+#     grouping factor
+#   ngrps: a vector with the number of groups for each grouping factor
+make_z_for_stan <- function(formula, model_frame) {
+  bars <- lme4::findbars(formula)
+  if (length(bars) > 2L)
+    stop2("A maximum of 2 grouping factors are allowed.")
+  z_parts <- lapply(bars, split_at_bars)
+  z_forms <- fetch(z_parts, "re_form")
+  z <- lapply(z_forms, model.matrix, model_frame)
+  group_cnms <- lapply(z, colnames)
+  group_vars <- fetch(z_parts, "group_var")
+  group_list <- lapply(group_vars, function(x) factor(model_frame[[x]]))
+  nvars <- lapply(group_cnms, length)
+  ngrps <- lapply(group_list, n_distinct)
+  names(z) <- names(z_forms) <- names(group_cnms) <-
+    names(group_list) <- names(nvars) <- names(ngrps) <- group_vars
+  nlist(z, z_forms, group_vars, group_cnms, group_list, nvars, ngrps)
+}
+
+
+# Take the model frame terms object and append with attributes
+# that provide the predvars for the fixed and random effects
+# parts, based on the model formula and data
+#
+# @param terms The existing model frame terms object
+# @param formula The formula that was used to build the model frame
+#   (but prior to having called lme4::subbars on it!)
+# @param data The data frame that was used to build the model frame
+# @return A terms object with predvars.fixed and predvars.random as
+#   additional attributes
+append_predvars_attribute <- function(terms, formula, data) {
+  fe_form <- lme4::nobars(formula)
+  re_form <- lme4::subbars(justRE(formula, response = TRUE))
+  fe_frame <- stats::model.frame(fe_form, data)
+  re_frame <- stats::model.frame(re_form, data)
+  fe_terms <- attr(fe_frame, "terms")
+  re_terms <- attr(re_frame, "terms")
+  fe_predvars <- attr(fe_terms, "predvars")
+  re_predvars <- attr(re_terms, "predvars")
+  attr(terms, "predvars.fixed")  <- attr(fe_terms, "predvars")
+  attr(terms, "predvars.random") <- attr(re_terms, "predvars")
+  terms
+}
+
+
+# Return info on the required type of intercept
+#
+# @param X The model matrix
+# @param family A family object
+# @return A named list with the following elements:
+#   type: character string specifying the type of bounds to use
+#     for the intercept.
+#   number: an integer specifying the type of bounds to use
+#     for the intercept where 0L = no intercept, 1L = no bounds
+#     on intercept, 2L = lower bound, 3L = upper bound.
+check_intercept_type <- function(X, family) {
+  fam <- family$family
+  link <- family$link
+  if (!X$has_intercept) { # no intercept
+    type <- "none"
+    needs_intercept <-
+      (!is.gaussian(fam) && link == "identity") ||
+      (is.gamma(fam) && link == "inverse") ||
+      (is.binomial(fam) && link == "log")
+    if (needs_intercept)
+      stop2("To use the specified combination of family and link (", fam,
+            ", ", link, ") the model must have an intercept.")
+  } else if (fam == "binomial" && link == "log") { # binomial, log
+    type <- "upper_bound"
+  } else if (fam == "binomial") { # binomial, !log
+    type <- "no_bound"
+  } else if (link == "log") { # gamma/inv-gaus/poisson/nb, log
+    type <- "no_bound"
+  } else if (fam == "gaussian") { # gaussian, !log
+    type <- "no_bound"
+  } else { # gamma/inv-gaus/poisson/nb, !log
+    type <- "lower_bound"
+  }
+  number <- switch(type, none = 0L, no_bound = 1L,
+                   lower_bound = 2L, upper_bound = 3L)
+  nlist(type, number)
+}
+
+justRE <- function(f, response = FALSE) {
+  response <- if (response && length(f) == 3) f[[2]] else NULL
+  reformulate(paste0("(", vapply(lme4::findbars(f),
+                                 function(x) paste(deparse(x, 500L),
+                                                   collapse = " "),
+                                 ""), ")"),
+              response = response)
+}
+
+
+# Function to return a single cnms object for all longitudinal submodels
+#
+# @param x A list, with each element being a cnms object returned by (g)lmer
+get_common_cnms <- function(y_mod, stub = "Long") {
+  y_cnms <- fetch(y_mod, "z", "group_cnms")
+  nms <- lapply(y_cnms, names)
+  unique_nms <- unique(unlist(nms))
+  cnms <- lapply(seq_along(unique_nms), function(i) {
+    nm <- unique_nms[i]
+    unlist(lapply(1:length(y_cnms), function(m)
+      if (nm %in% nms[[m]]) paste0(stub, m, "|", y_cnms[[m]][[nm]])))
+  })
+  names(cnms) <- unique_nms
+  if (length(cnms) > 2L)
+    stop("A maximum of 2 grouping factors are allowed.")
+  cnms
+}
+
+# Function to return a single list with the factor levels for each
+# grouping factor, but collapsed across all longitudinal submodels
+#
+# @param x A list containing the flist object for each of the submodels
+get_common_flevels <- function(y_mod) {
+  y_flevels <- fetch(y_mod, "z", "group_list")
+  nms <- lapply(y_flevels, names)
+  unique_nms <- unique(unlist(nms))
+  flevels <- lapply(seq_along(unique_nms), function(i) {
+    nm <- unique_nms[i]
+    flevels_nm <- lapply(1:length(y_flevels), function(m)
+      if (nm %in% nms[[m]]) levels(y_flevels[[m]][[nm]]))
+    flevels_nm <- rm_null(unique(flevels_nm))
+    if (length(flevels_nm) > 1L)
+      stop2("The group factor levels must be the same for all submodels.")
+    flevels_nm[[1L]]
+  })
+  names(flevels) <- unique_nms
+  flevels
+}
+
+# Check the id_var argument is valid and is included appropriately in the
+# formulas for each of the longitudinal submodels
+#
+# @param id_var The character string that the user specified for the id_var
+#   argument -- will have been set to NULL if the argument was missing.
+# @param y_cnms A list of length M with the cnms for each longitudinal submodel
+# @param y_flist A list of length M with the flist for each longitudinal submodel
+# @return Returns the character string corresponding to the appropriate id_var.
+#   This will either be the user specified id_var argument or the only grouping
+#   factor.
+check_id_var <- function(y_mod, id_var) {
+
+  y_cnms <- fetch(y_mod, "z", "group_cnms")
+
+  len_cnms <- sapply(y_cnms, length) # num grouping factors in each submodel
+
+  if (any(len_cnms > 1L)) { # multiple grouping factors
+
+    if (is.null(id_var))
+      stop2("With more than one grouping factor 'id_var' must be specified.")
+    lapply(y_cnms, function(x)  if (!(id_var %in% names(x)))
+      stop2("'id_var' must be a grouping factor in each longitudinal submodel."))
+    return(id_var)
+
+  } else { # only one grouping factor (assumed to be subject ID)
+
+    only_cnm <- unique(sapply(y_cnms, names))
+    if (length(only_cnm) > 1L)
+      stop2("The grouping factor (ie, subject ID variable) is not the ",
+            "same in all longitudinal submodels.")
+    if (not.null(id_var) && !identical(id_var, only_cnm))
+      warning2("The user specified 'id_var' (", paste(id_var),
+               ") and the assumed ID variable based on the single ",
+               "grouping factor (", paste(only_cnm), ") are not the same; ",
+               "'id_var' will be ignored")
+    return(only_cnm)
+  }
+}
+
+# Check the factor list corresponding to subject ID is the same in each
+# of the longitudinal submodels
+#
+# @param id_var The name of the ID variable
+# @param y_flist A list containing the flist objects returned for each
+#   separate longitudinal submodel
+# @return A vector of factor levels corresponding to the IDs appearing
+#   in the longitudinal submodels
+check_id_list <- function(y_mod, id_var) {
+  y_flist <- fetch(y_mod, "z", "group_list")
+  id_list <- unique(lapply(y_flist, function(x) levels(x[[id_var]])))
+  if (length(id_list) > 1L)
+    stop2("The subject IDs are not the same in all longitudinal submodels.")
+  unlist(id_list)
+}
+
+# Check the weights argument for stan_jm
+#
+# @param weights The data frame passed via the weights argument
+# @param id_var The name of the ID variable
+check_weights <- function(weights, id_var) {
+
+  if (is.null(weights))
+    return(weights)
+
+  # Check weights are an appropriate data frame
+  if ((!is.data.frame(weights)) || (!ncol(weights) == 2))
+    stop("'weights' argument should be a data frame with two columns: the first ",
+         "containing patient IDs, the second containing their corresponding ",
+         "weights.", call. = FALSE)
+  if (!id_var %in% colnames(weights))
+    stop("The data frame supplied in the 'weights' argument should have a ",
+         "column named ", id_var, call. = FALSE)
+  weight_var <- setdiff(colnames(weights), id_var)
+
+  # Check weights are positive and numeric
+  wts <- weights[[weight_var]]
+  if (!is.numeric(wts))
+    stop("The weights supplied must be numeric.", call. = FALSE)
+  if (any(wts < 0))
+    stop("Negative weights are not allowed.", call. = FALSE)
+
+  # Check only one weight per ID
+  n_weights_per_id <- tapply(weights[[weight_var]], weights[[id_var]], length)
+  if (!all(n_weights_per_id == 1L))
+    stop("The data frame supplied in the 'weights' argument should only have ",
+         "one row (ie, one weight) per patient ID.", call. = FALSE)
+}
+
+# Return the vector of prior weights for one of the submodels
+#
+# @param mod_stuff A named list with elements: y, flist, ord
+# @param weights The data frame passed via the weights argument
+# @param id_var The name of the ID variable
+handle_weights <- function(mod_stuff, weights, id_var) {
+
+  is_glmod <- (is.null(mod_stuff$eventtime))
+
+  # No weights provided by user
+  if (is.null(weights)) {
+    len <- if (is_glmod) length(mod_stuff$Y$Y) else 0
+    return(rep(0.0, len))
+  }
+
+  # Check for IDs with no weight supplied
+  weights[[id_var]] <- factor(weights[[id_var]])
+  ids <- if (is_glmod) mod_stuff$Z$group_list[[id_var]] else factor(mod_stuff$id_list)
+  sel <- which(!ids %in% weights[[id_var]])
+  if (length(sel)) {
+    if (length(sel) > 30L) sel <- sel[1:30]
+    stop(paste0("The following patient IDs are used in fitting the model, but ",
+                "do not have weights supplied via the 'weights' argument: ",
+                paste(ids[sel], collapse = ", ")), call. = FALSE)
+  }
+
+  # Obtain length and ordering of weights vector using flist
+  wts_df  <- merge(data.frame(id = ids), weights, by.x = "id", by.y = id_var, sort = FALSE)
+  wts_var <- setdiff(colnames(weights), id_var)
+  wts     <- wts_df[[wts_var]]
+
+  wts
+}
+
+
+# Deal with covariance prior
+#
+# @param prior A list
+# @param cnms A list of lists, with names of the group specific
+#   terms for each grouping factor
+# @param ok_dists A list of admissible distributions
+handle_cov_prior <- function(prior, cnms, ok_dists = nlist("decov", "lkj")) {
+  if (!is.list(prior))
+    stop(sQuote(deparse(substitute(prior))), " should be a named list")
+  t <- length(unique(cnms)) # num grouping factors
+  p <- sapply(cnms, length) # num terms for each grouping factor
+  prior_dist_name <- prior$dist
+  if (!prior_dist_name %in% unlist(ok_dists)) {
+    stop("The prior distribution should be one of ",
+         paste(names(ok_dists), collapse = ", "))
+  } else if (prior_dist_name == "decov") {
+    prior_shape <- as.array(maybe_broadcast(prior$shape, t))
+    prior_scale <- as.array(maybe_broadcast(prior$scale, t))
+    prior_concentration <-
+      as.array(maybe_broadcast(prior$concentration, sum(p[p > 1])))
+    prior_regularization <-
+      as.array(maybe_broadcast(prior$regularization, sum(p > 1)))
+    prior_df <- NULL
+  } else if (prior_dist_name == "lkj") {
+    prior_shape <- NULL
+    prior_scale <- as.array(maybe_broadcast(prior$scale, sum(p)))
+    prior_concentration <- NULL
+    prior_regularization <-
+      as.array(maybe_broadcast(prior$regularization, sum(p > 1)))
+    prior_df <- as.array(maybe_broadcast(prior$df, sum(p)))
+  }
+  prior_dist <- switch(prior_dist_name, decov = 1L, lkj = 2L)
+
+  nlist(prior_dist_name, prior_dist, prior_shape, prior_scale,
+        prior_concentration, prior_regularization, prior_df, t, p,
+        prior_autoscale = isTRUE(prior$autoscale))
+}
+
+# Seperate the information about the covariance prior into a list
+# of lists. At the top level of the returned list the elements
+# correpond to each of the grouping factors, and on the second level
+# of the returned list the elements correpsond to the separate glmer
+# submodels. This separation is required for autoscaling the priors
+# on the sds of group level effects, since these are autoscaled based
+# on the separate Z matrices (design matrices for the random effects).
+#
+# @param prior_stuff The named list returned by handle_cov_prior
+# @param cnms The component names for group level terms, combined across
+#   all glmer submodels
+# @param submodel_cnms The component names for the group level terms,
+#   separately for each glmer submodel (stored as a list of length M)
+# @return A list with each element containing the covariance prior
+#   information for one grouping factor
+split_cov_prior <- function(prior_stuff, cnms, submodel_cnms) {
+  if (!prior_stuff$prior_dist_name == "lkj") {
+    return(prior_stuff) # nothing to be done for decov prior
+  } else {
+    M <- length(submodel_cnms) # number of submodels
+    cnms_nms <- names(cnms) # names of grouping factors
+    mark <- 0
+    new_prior_stuff <- list()
+    for (nm in cnms_nms) {
+      for (m in 1:M) {
+        len <- length(submodel_cnms[[m]][[nm]])
+        new_prior_stuff[[nm]][[m]] <- prior_stuff
+        if (len) {
+          # submodel 'm' has group level terms for group factor 'nm'
+          beg <- mark + 1; end <- mark + len
+          new_prior_stuff[[nm]][[m]]$prior_scale <- prior_stuff$prior_scale[beg:end]
+          new_prior_stuff[[nm]][[m]]$prior_df <- prior_stuff$prior_df[beg:end]
+          mark <- mark + len
+        } else {
+          new_prior_stuff[[nm]][[m]]$prior_scale <- NULL
+          new_prior_stuff[[nm]][[m]]$prior_df <- NULL
+          new_prior_stuff[[nm]][[m]]$prior_regularization <- NULL
+        }
+      }
+    }
+  }
+  new_prior_stuff
+}
+
+# From a vector of length M giving the number of elements (for example number
+# of parameters or observations) for each submodel, create an indexing array
+# of dimension M * 2, where column 1 is the beginning index and 2 is the end index
+#
+# @param x A numeric vector
+# @return A length(x) * 2 array
+get_idx_array <- function(x) {
+  aa(do.call("rbind", lapply(1:length(x), function(i) {
+    idx_beg <- ifelse(x[i] > 0L, sum(x[0:(i-1)]) + 1, 0L)
+    idx_end <- ifelse(x[i] > 0L, sum(x[0:i]),         0L)
+    c(idx_beg, idx_end)
+  })))
+}
+
+# Check that the ids in the longitudinal and survival models match
+validate_jm_ids <- function(y_ids, e_ids) {
+  if (!identical(y_ids, levels(factor(e_ids))))
+    stop2("The patient IDs (levels of the grouping factor) included ",
+          "in the longitudinal and event submodels do not match")
+  if (is.unsorted(factor(e_ids)))
+    stop2("'dataEvent' needs to be sorted by the subject ID/grouping variable.")
+  if (!identical(length(y_ids), length(e_ids)))
+    stop2("The number of patients differs between the longitudinal and ",
+          "event submodels. Perhaps you intended to use 'start/stop' notation ",
+          "for the Surv() object.")
+}
+
+
+# Function to return standardised GK quadrature points and weights
+#
+# @param nodes The required number of quadrature nodes
+# @return A list with two named elements (points and weights) each
+#   of which is a numeric vector with length equal to the number of
+#   quadrature nodes
+get_quadpoints <- function(nodes = 15) {
+  if (!is.numeric(nodes) || (length(nodes) > 1L)) {
+    stop("'qnodes' should be a numeric vector of length 1.")
+  } else if (nodes == 15) {
+    list(
+      points = c(
+        -0.991455371120812639207,
+        -0.949107912342758524526,
+        -0.86486442335976907279,
+        -0.7415311855993944398639,
+        -0.5860872354676911302941,
+        -0.4058451513773971669066,
+        -0.2077849550078984676007,
+        0,
+        0.2077849550078984676007,
+        0.405845151377397166907,
+        0.5860872354676911302941,
+        0.741531185599394439864,
+        0.86486442335976907279,
+        0.9491079123427585245262,
+        0.991455371120812639207),
+      weights = c(
+        0.0229353220105292249637,
+        0.063092092629978553291,
+        0.10479001032225018384,
+        0.140653259715525918745,
+        0.1690047266392679028266,
+        0.1903505780647854099133,
+        0.204432940075298892414,
+        0.209482141084727828013,
+        0.204432940075298892414,
+        0.1903505780647854099133,
+        0.169004726639267902827,
+        0.140653259715525918745,
+        0.1047900103222501838399,
+        0.063092092629978553291,
+        0.0229353220105292249637))
+  } else if (nodes == 11) {
+    list(
+      points = c(
+        -0.984085360094842464496,
+        -0.906179845938663992798,
+        -0.754166726570849220441,
+        -0.5384693101056830910363,
+        -0.2796304131617831934135,
+        0,
+        0.2796304131617831934135,
+        0.5384693101056830910363,
+        0.754166726570849220441,
+        0.906179845938663992798,
+        0.984085360094842464496),
+      weights = c(
+        0.042582036751081832865,
+        0.1152333166224733940246,
+        0.186800796556492657468,
+        0.2410403392286475866999,
+        0.272849801912558922341,
+        0.2829874178574912132043,
+        0.272849801912558922341,
+        0.241040339228647586701,
+        0.186800796556492657467,
+        0.115233316622473394025,
+        0.042582036751081832865))
+  } else if (nodes == 7) {
+    list(
+      points = c(
+        -0.9604912687080202834235,
+        -0.7745966692414833770359,
+        -0.4342437493468025580021,
+        0,
+        0.4342437493468025580021,
+        0.7745966692414833770359,
+        0.9604912687080202834235),
+      weights = c(
+        0.1046562260264672651938,
+        0.268488089868333440729,
+        0.401397414775962222905,
+        0.450916538658474142345,
+        0.401397414775962222905,
+        0.268488089868333440729,
+        0.104656226026467265194))
+  } else stop("'qnodes' must be either 7, 11 or 15.")
+}
