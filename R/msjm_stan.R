@@ -515,10 +515,10 @@ msjm_stan <- function(formulaLong,
                       priorLong = rstanarm::normal(),
                       priorLong_intercept = rstanarm::normal(),
                       priorLong_aux = rstanarm::cauchy(0, 5),
-                      priorEvent = normal(),
-                      priorEvent_intercept = normal(),
-                      priorEvent_aux = cauchy(),
-                      priorEvent_assoc = normal(),
+                      priorMs = rstanarm::normal(),
+                      priorMs_intercept = rstanarm::normal(),
+                      priorMs_aux = rstanarm::cauchy(),
+                      priorMs_assoc = rstanarm::normal(),
                       prior_covariance = rstanarm::lkj(),
                       prior_PD = FALSE,
                       algorithm = c("sampling", "meanfield", "fullrank"),
@@ -994,11 +994,55 @@ msjm_stan <- function(formulaLong,
   if (is_msjm) { # begin jm block
 
     # fit separate event submodel
-    ms_mod <-  handle_ms_mod(formula = formulaMs,
-                             data    = dataMs,
-                             meta    = meta)
-    meta$has_icens <- e_mod$has_icens
+    # ms_mod <-  handle_ms_mod(formula = formulaMs,
+    #                          data    = dataMs,
+    #                          meta    = meta)
 
+    ms_mod <- lapply(seq_len(n_trans), function(j)
+      handle_e_mod2(
+      formulaMs[[j]],
+      dataMs[[j]],
+      meta,
+      j) )
+
+    meta$has_icens <- lapply(ms_mod, function(ms_mod) ms_mod$has_icens)
+
+    meta$id_state <- lapply(dataMs, function(x) extract_id(x, id_var))
+
+    # observation weights
+    #e_weights <- handle_weights(e_mod, weights, id_var)
+    assoc_obs <- list()
+    for(m in seq_len(M)){
+      assoc_obs[[m]] <- lapply(seq_len(n_trans), function(j)
+        assoc_time( x = dataLong[[m]],
+                    t_var = time_var,
+                    t = ms_mod[[j]]$eventtime + meta$time_start[[j]] ,
+                    id_state = meta$id_state[[j]] ) )
+    }
+
+
+    # check longitudinal observation times are not later than the event time
+    for(j in seq_len(n_trans)){
+      if(is.data.frame(dataLong)){
+        validate_observation_times(
+          data = dataLong[assoc_obs[[m]][[j]], ],
+          eventtimes = ms_mod[[j]]$eventtime + meta$time_start[[j]],
+          id_var     = id_var,
+          time_var   = time_var
+        )
+      } else {
+        lapply(seq_len(M), function(m){
+          validate_observation_times(
+            data = dataLong[[m]][assoc_obs[[m]][[j]], ],
+            eventtimes = ms_mod[[j]]$eventtime + meta$time_start[[j]],
+            id_var     = id_var,
+            time_var   = time_var
+          )
+        })
+      }
+    }
+
+    #----------- Prior distributions -----------#
 
   }
 

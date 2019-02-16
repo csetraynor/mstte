@@ -10,10 +10,11 @@ msjm_stan(formulaLong, dataLong, formulaMs, dataMs, time_var = "time",
   basehaz = c("bs", "weibull", "piecewise"), basehaz_ops, qnodes = 15,
   init = "prefit", weights, priorLong = rstanarm::normal(),
   priorLong_intercept = rstanarm::normal(),
-  priorLong_aux = rstanarm::cauchy(0, 5), priorEvent = normal(),
-  priorEvent_intercept = normal(), priorEvent_aux = cauchy(),
-  priorEvent_assoc = normal(), prior_covariance = rstanarm::lkj(),
-  prior_PD = FALSE, algorithm = c("sampling", "meanfield", "fullrank"),
+  priorLong_aux = rstanarm::cauchy(0, 5), priorMs = rstanarm::normal(),
+  priorMs_intercept = rstanarm::normal(),
+  priorMs_aux = rstanarm::cauchy(), priorMs_assoc = rstanarm::normal(),
+  prior_covariance = rstanarm::lkj(), prior_PD = FALSE,
+  algorithm = c("sampling", "meanfield", "fullrank"),
   adapt_delta = 0.99, max_treedepth = 10L, QR = FALSE,
   sparse = FALSE, ...)
 }
@@ -253,6 +254,12 @@ within individuals.}
   that correspond to any longitudinal submodel which does not have an
   auxiliary parameter will be ignored.}
 
+\item{prior_covariance}{Cannot be \code{NULL}; see \code{\link{priors}} for
+more information about the prior distributions on covariance matrices.
+Note however that the default prior for covariance matrices in
+\code{stan_jm} is slightly different to that in \code{\link{stan_glmer}}
+(the details of which are described on the \code{\link{priors}} page).}
+
 \item{priorEvent_aux}{The prior distribution for the "auxiliary" parameters
 in the event submodel. The "auxiliary" parameters refers to different
 parameters depending on the baseline hazard. For \code{basehaz = "weibull"}
@@ -261,12 +268,6 @@ the auxiliary parameter is the Weibull shape parameter. For
 B-spline approximation to the log baseline hazard.
 For \code{basehaz = "piecewise"} the auxiliary parameters are the piecewise
 estimates of the log baseline hazard.}
-
-\item{prior_covariance}{Cannot be \code{NULL}; see \code{\link{priors}} for
-more information about the prior distributions on covariance matrices.
-Note however that the default prior for covariance matrices in
-\code{stan_jm} is slightly different to that in \code{\link{stan_glmer}}
-(the details of which are described on the \code{\link{priors}} page).}
 }
 \value{
 A \link[=stanreg-objects]{stanjm} object is returned.

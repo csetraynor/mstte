@@ -25,3 +25,8 @@ prior_intercept = lapply(1:3, function(x)
 
 prior_aux = lapply(1:3, function(x)
   rstanarm::normal() )
+
+dataLong = sim1$Long1
+dataMs = sim1$Mstate
+
+time_var = "tij"

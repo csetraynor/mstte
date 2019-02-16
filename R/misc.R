@@ -274,7 +274,20 @@ qtile <- function(x, nq = 2) {
   }
 }
 
+# Paste character vector collapsing with a comma
+comma <- function(x) {
+  paste(x, collapse = ", ")
+}
+
+
 # -------------- Sanity checks ---------#
+# Error message when a required variable is missing from the data frame
+#
+# @param var The name of the variable that could not be found
+STOP_no_var <- function(var) {
+  stop2("Variable '", var, "' cannot be found in the data frame.")
+}
+
 
 # Issue warning if high rhat values
 #
@@ -1390,6 +1403,31 @@ get_id_var <- function(x){
     as.character( rownames(x) )
   }
 }
+
+# Return the names for the group specific coefficients
+#
+# @param cnms A named list with the names of the parameters nested within each
+#   grouping factor.
+# @param flevels A named list with the (unique) factor levels nested within each
+#   grouping factor.
+# @return A character vector.
+get_ranef_name <- function(cnms, flevels) {
+  cnms_nms <- names(cnms)
+  b_nms <- uapply(seq_along(cnms), FUN = function(i) {
+    nm <- cnms_nms[i]
+    nms_i <- paste(cnms[[i]], nm)
+    flevels[[nm]] <- c(gsub(" ", "_", flevels[[nm]]),
+                       paste0("_NEW_", nm))
+    if (length(nms_i) == 1) {
+      paste0(nms_i, ":", flevels[[nm]])
+    } else {
+      c(t(sapply(nms_i, paste0, ":", flevels[[nm]])))
+    }
+  })
+  c(paste0("b[", b_nms, "]"))
+}
+
+
 
 # Return a vector with valid names for elements in the list passed to the
 # 'basehaz_ops' argument of a 'stan_jm' or 'stan_surv' call
