@@ -500,7 +500,7 @@ msjm_stan <- function(formulaLong,
                       dataLong,
                       formulaMs,
                       dataMs,
-                      time_var = "time",
+                      time_var,
                       time_start = "Tstart",
                       n_trans,
                       id_var,
@@ -639,7 +639,11 @@ msjm_stan <- function(formulaLong,
   #--------------------------
 
   # info for separate longitudinal submodels
-  y_mod <- xapply(formulaLong, dataLong, family, stubs, FUN = handle_y_mod)
+  y_mod <- xapply(formulaLong,
+                  dataLong,
+                  family,
+                  stubs,
+                  FUN = handle_y_mod)
 
   # construct single cnms list for all longitudinal submodels
   meta$cnms <- cnms <- get_common_cnms(y_mod, stub = stub)
@@ -1043,6 +1047,56 @@ msjm_stan <- function(formulaLong,
     }
 
     #----------- Prior distributions -----------#
+
+    # valid prior distributions
+    ok_dists_e_aux <- ok_dists[1:3]
+
+    # note: *_user_prior_*_stuff objects are stored unchanged for constructing
+    # prior_summary, while *_prior_*_stuff objects are autoscaled
+
+    # priors for event submodel
+    ms_user_prior_stuff <- ms_prior_stuff <- lapply(seq_len(n_trans), function(j){
+      handle_glm_prior(priorMs[[j]],
+                       nvars = ms_mod[[j]]$K,
+                       default_scale = 2.5,
+                       link = NULL,
+                       ok_dists = ok_dists)
+    }
+    )
+
+    ms_user_prior_intercept_stuff <- prior_intercept_stuff <-
+      lapply(priorMs_intercept,
+        FUN = handle_glm_prior,
+        nvars = 1,
+        default_scale = 20,
+        link = NULL,
+        ok_dists = ok_dists_int)
+
+    ms_user_prior_aux_stuff <- prior_aux_stuff <-
+      lapply(seq_len(n_trans), function(j) handle_glm_prior(
+        priorMs_aux[[j]],
+        nvars = ms_mod[[j]]$basehaz$nvars,
+        default_scale = get_default_aux_scale(basehaz[[j]]),
+        link = NULL,
+        ok_dists = ok_dists_e_aux)
+      )
+
+    # stop null priors if prior_PD is TRUE
+    if (prior_PD) {
+      if (any(is.null(priorMs)))
+        stop("'priorEvent' cannot be NULL if 'prior_PD' is TRUE")
+      if (any(is.null(priorMs_intercept)) && ms_mod$has_intercept)
+        stop("'priorEvent_intercept' cannot be NULL if 'prior_PD' is TRUE")
+      if (any(is.null(prior_aux)))
+        stop("'priorEvent_aux' cannot be NULL if 'prior_PD' is TRUE")
+    }
+
+    # autoscaling of priors
+    e_prior_stuff           <- autoscale_prior(e_prior_stuff, predictors = e_mod$x)
+    e_prior_intercept_stuff <- autoscale_prior(e_prior_intercept_stuff)
+    e_prior_aux_stuff       <- autoscale_prior(e_prior_aux_stuff)
+
+
 
   }
 
