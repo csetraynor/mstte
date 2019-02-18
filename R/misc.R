@@ -34,6 +34,14 @@ rb <- function(x){
   do.call(rbind, x)
 }
 
+# Standardise a coefficient
+standardise_coef <- function(x, location = 0, scale = 1)
+  (x - location) / scale
+
+# Return a one-dimensional array or an empty numeric
+array_else_double <- function(x)
+  if (!length(x)) double(0) else as.array(unlist(x))
+
 # Select rows of a matrix
 #
 # @param x A matrix.
@@ -295,6 +303,11 @@ STOP_no_var <- function(var) {
 }
 
 
+# Error message when the argument contains an object of the incorrect type
+STOP_arg <- function(arg_name, type) {
+  stop(paste0("'", arg_name, "' should be a ", paste0(type, collapse = " or "),
+              " object or a list of those objects."), call. = FALSE)
+}
 # Issue warning if high rhat values
 #
 # @param rhats Vector of rhat values.
@@ -1725,6 +1738,79 @@ get_basehaz_name <- function(x, ind) {
   stop("Bug found: could not resolve basehaz name.")
 }
 
+# Separates a names object into separate parts based on the longitudinal,
+# event, or association parameters.
+#
+# @param x Character vector (often rownames(fit$stan_summary))
+# @param M An integer specifying the number of longitudinal submodels.
+# @param stub The character string used at the start of the names of variables
+#   in the longitudinal/GLM submodels
+# @param ... Arguments passed to grep
+# @return A list with x separated out into those names corresponding
+#   to parameters from the M longitudinal submodels, the event submodel
+#   or association parameters.
+collect_nms <- function(x, M, stub = "Long", ...) {
+  ppd <- grep(paste0("^", stub, ".{1}\\|mean_PPD"), x, ...)
+  y <- lapply(1:M, function(m) grep(mod2rx(m, stub = stub), x, ...))
+  y_extra <- lapply(1:M, function(m)
+    c(grep(paste0("^", stub, m, "\\|sigma"), x, ...),
+      grep(paste0("^", stub, m, "\\|shape"), x, ...),
+      grep(paste0("^", stub, m, "\\|lambda"), x, ...),
+      grep(paste0("^", stub, m, "\\|reciprocal_dispersion"), x, ...)))
+  y <- lapply(1:M, function(m) setdiff(y[[m]], c(y_extra[[m]], ppd[m])))
+  e <- grep(mod2rx("^Event"), x, ...)
+  e_extra <- c(grep("^Event\\|weibull-shape|^Event\\|b-splines-coef|^Event\\|piecewise-coef", x, ...))
+  e <- setdiff(e, e_extra)
+  a <- grep(mod2rx("^Assoc"), x, ...)
+  b <- b_names(x, ...)
+  y_b <- lapply(1:M, function(m) b_names_M(x, m, stub = stub, ...))
+  alpha <- grep("^.{5}\\|\\(Intercept\\)", x, ...)
+  alpha <- c(alpha, grep(pattern=paste0("^", stub, ".{1}\\|\\(Intercept\\)"), x=x, ...))
+  beta <- setdiff(c(unlist(y), e, a), alpha)
+  nlist(y, y_extra, y_b, e, e_extra, a, b, alpha, beta, ppd)
+}
+
+# Converts "Long", "Event" or "Assoc" to the regular expression
+# used at the start of variable names for the fitted joint model
+#
+# @param x The submodel for which the regular expression should be
+#   obtained. Can be "Long", "Event", "Assoc", or an integer specifying
+#   a specific longitudinal submodel.
+mod2rx <- function(x, stub = "Long") {
+  if (x == "^Long") {
+    c("^Long[1-9]\\|")
+  } else if (x == "^Event") {
+    c("^Event\\|")
+  } else if (x == "^Assoc") {
+    c("^Assoc\\|")
+  } else if (x == "Long") {
+    c("Long[1-9]\\|")
+  } else if (x == "Event") {
+    c("Event\\|")
+  } else if (x == "Assoc") {
+    c("Assoc\\|")
+  } else if (x == "^y") {
+    c("^y[1-9]\\|")
+  } else if (x == "y") {
+    c("y[1-9]\\|")
+  } else {
+    paste0("^", stub, x, "\\|")
+  }
+}
+# Grep for "b" parameters (ranef), can optionally be specified
+# for a specific longitudinal submodel
+#
+# @param x Character vector (often rownames(fit$stan_summary))
+# @param submodel Optional integer specifying which long submodel
+# @param ... Passed to grep
+b_names_M <- function(x, submodel = NULL, stub = "Long", ...) {
+  if (is.null(submodel)) {
+    grep("^b\\[", x, ...)
+  } else {
+    grep(paste0("^b\\[", stub, submodel, "\\|"), x, ...)
+  }
+}
+
 # Test if an object inherits a specific stanreg class
 #
 # @param x The object to test.
@@ -1972,3 +2058,78 @@ rep_rows <- function(x, ...) {
 promote_to_factor <- function(x) {
   if (is.character(x)) as.factor(x) else x
 }
+
+# Return a data.table with a key set using the appropriate id/time/grp variables
+#
+# @param data A data frame.
+# @param id_var The name of the ID variable.
+# @param grp_var The name of the variable identifying groups clustered within
+#   individuals.
+# @param time_var The name of the time variable.
+# @return A data.table (which will be used in a rolling merge against the
+#   event times and/or quadrature times).
+prepare_data_table <- function(data, id_var, time_var, grp_var = NULL) {
+  if (!requireNamespace("data.table"))
+    stop("the 'data.table' package must be installed to use this function")
+  if (!is.data.frame(data))
+    stop("'data' should be a data frame.")
+
+  # check required vars are in the data
+  if (!id_var %in% colnames(data))
+    STOP_no_var(id_var)
+  if (!time_var %in% colnames(data))
+    STOP_no_var(time_var)
+  if (!is.null(grp_var) && (!grp_var %in% colnames(data)))
+    STOP_no_var(grp_var)
+
+  # define and set the key for the data.table
+  key_vars <- if (!is.null(grp_var))
+    c(id_var, grp_var, time_var) else c(id_var, time_var)
+  dt <- data.table::data.table(data, key = key_vars)
+
+  dt[[time_var]] <- as.numeric(dt[[time_var]]) # ensures no rounding on merge
+  dt[[id_var]]   <- factor(dt[[id_var]])       # ensures matching of ids
+  if (!is.null(grp_var))
+    dt[[grp_var]]   <- factor(dt[[grp_var]])   # ensures matching of grps
+  dt
+}
+
+
+# Carry out a rolling merge
+#
+# @param data A data.table with a set key corresponding to ids, times (and
+#   possibly also grps).
+# @param ids A vector of patient ids to merge against.
+# @param times A vector of times to (rolling) merge against.
+# @param grps An optional vector of groups clustered within patients to
+#   merge against. Only relevant when there is clustering within patient ids.
+# @return A data.table formed by a merge of ids, (grps), times, and the closest
+#   preceding (in terms of times) rows in data.
+rolling_merge <- function(data, ids, times, grps = NULL) {
+  if (!requireNamespace("data.table"))
+    stop("the 'data.table' package must be installed to use this function")
+
+  # check data.table is keyed
+  key_length <- length(data.table::key(data))
+  val_length <- if (is.null(grps)) 2L else 3L
+  if (key_length == 0L)
+    stop2("Bug found: data.table should have a key.")
+  if (!key_length == val_length)
+    stop2("Bug found: data.table key is not the same length as supplied keylist.")
+
+  # ensure data types are same as returned by the prepare_data_table function
+  ids   <- factor(ids)       # ensures matching of ids
+  times <- as.numeric(times) # ensures no rounding on merge
+
+  # carry out the rolling merge against the specified times
+  if (is.null(grps)) {
+    tmp <- data.table::data.table(ids, times)
+    val <- data[tmp, roll = TRUE, rollends = c(TRUE, TRUE)]
+  } else {
+    grps <- factor(grps)
+    tmp <- data.table::data.table(ids, grps, times)
+    val <- data[tmp, roll = TRUE, rollends = c(TRUE, TRUE)]
+  }
+  val
+}
+

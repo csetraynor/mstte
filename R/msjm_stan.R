@@ -547,8 +547,8 @@ msjm_stan <- function(formulaLong,
   if (missing(weights))     weights     <- NULL
   if (missing(id_var))      id_var      <- NULL
   if (missing(time_var))    time_var    <- NULL
-  if (missing(time_start))  time_start <- NULL
-  if (missing(grp_assoc))
+  if (missing(time_start))  time_start  <- NULL
+  if (missing(grp_assoc))   grp_assoc   <- NULL
 
   if (!is.null(weights))
     stop("'weights' are not yet implemented.")
@@ -570,7 +570,7 @@ msjm_stan <- function(formulaLong,
   } else if(missing(n_trans)){
     n_trans     <- length(formulaMs)
   }  else {
-    maybe_broadcast(formulaMs, n_trans)
+    formulaMs <-  maybe_broadcast(formulaMs, n_trans)
   }
   basehaz   <- maybe_broadcast(basehaz, n_trans)
   qnodes    <- maybe_broadcast(qnodes, n_trans)
@@ -582,7 +582,7 @@ msjm_stan <- function(formulaLong,
   is_msjm <- supplied_together(formulaLong, formulaMs) & (n_trans > 1)
 
   if (is_msjm && is.null(time_start))
-    stop("'time_start' must be specified.")
+    stop("'time_start' variable must be specified.")
 
   # Family
   ok_family_classes <- c("function", "family", "character")
@@ -615,7 +615,6 @@ msjm_stan <- function(formulaLong,
   dataMs <- lapply(seq_len(n_trans), function(i) make_model_data(formulaMs[[i]]$tf_form, dataMs[[i]] ) )  # row subsetting etc.
 
   pos <- sapply(dataMs, function(d) nrow(d))
-  time_start <- lapply(dataMs, function(d) get_timestart(d, time_start))
 
   # Observation weights
   has_weights <- !is.null(weights)
@@ -1017,22 +1016,28 @@ msjm_stan <- function(formulaLong,
 
     # observation weights
     #e_weights <- handle_weights(e_mod, weights, id_var)
+
+    # Handle time start
+    time_start <- lapply(dataMs, function(d) handle_timestart(d, time_start))
+
     assoc_obs <- list()
     for(m in seq_len(M)){
       assoc_obs[[m]] <- lapply(seq_len(n_trans), function(j)
         assoc_time( x = dataLong[[m]],
                     t_var = time_var,
-                    t = ms_mod[[j]]$t_end + meta$time_start[[j]] ,
+                    t = ms_mod[[j]]$t_end + time_start[[j]] ,
                     id_state = meta$id_state[[j]] ) )
     }
-
+    for(j in seq_len(n_trans)){
+      ms_mod[[j]]$assoc_obs <- assoc_obs[[1]][[j]]
+    }
 
     # check longitudinal observation times are not later than the event time
     for(j in seq_len(n_trans)){
       if(is.data.frame(dataLong)){
         validate_observation_times(
           data = dataLong[assoc_obs[[m]][[j]], ],
-          exittime = ms_mod[[j]]$t_end + meta$time_start[[j]],
+          exittime = ms_mod[[j]]$t_end + time_start[[j]],
           id_var     = id_var,
           time_var   = time_var
         )
@@ -1040,7 +1045,7 @@ msjm_stan <- function(formulaLong,
         lapply(seq_len(M), function(m){
           validate_observation_times(
             data = dataLong[[m]][assoc_obs[[m]][[j]], ],
-            exittime = ms_mod[[j]]$t_end + meta$time_start[[j]],
+            exittime = ms_mod[[j]]$t_end + time_start[[j]],
             id_var     = id_var,
             time_var   = time_var
           )
@@ -1331,15 +1336,88 @@ msjm_stan <- function(formulaLong,
       validate_assoc_with_grp(grp_stuff, assoc, ok_assoc_with_grp)
 
     # design matrices for longitudinal submodel at the quadrature points
-    auc_qnodes <- meta$auc_qnodes <- 15L
+    auc_qnodes <- meta$auc_qnodes <- maybe_broadcast(15L, n_trans)
     a_mod <- list()
-    for(j in seq_len(n_trans)){
-      a_mod[[j]] <- xapply(FUN       = handle_assocmod,
+
+    for(j in (seq_len(n_trans))){
+      a_mod[[j]] <- xapply(FUN  = handle_assocmod2,
                       data      = dataLong,
                       assoc     = apply(assoc, 2L, c), # converts array to list
                       y_mod     = y_mod,
                       grp_stuff = grp_stuff,
-                      args      = nlist(ms_mod[[j]], meta))
+                      args      = nlist(e_mod = ms_mod[[j]],
+                                        meta,
+                                        j))
+    }
+
+    # number of association parameters
+    a_K <- lapply(a_mod, function(a_mod) get_num_assoc_pars(assoc, a_mod))
+
+    # use a stan_mvmer variational bayes model fit for:
+    # - obtaining initial values for joint model parameters
+    # - obtaining appropriate scaling for priors on association parameters
+    dropargs  <- c("chains", "cores", "iter", "refresh", "test_grad", "control")
+    init_dots <- list(...); for (i in dropargs) init_dots[[i]] <- NULL
+    init_mod  <- stanmodels$mvmer2
+    init_data <- standata
+    init_pars <- pars_to_monitor(standata, is_jm = FALSE)
+    init_args <- nlist(object = init_mod,
+                       data   = init_data,
+                       pars   = init_pars,
+                       algorithm = "meanfield")
+    init_args[names(init_dots)] <- init_dots
+    utils::capture.output(init_fit <- do.call(rstan::vb, init_args))
+    init_nms_all <- c(y_nms_int,
+                      y_nms_beta,
+                      b_nms,
+                      y_nms_aux,
+                      y_nms_sigma,
+                      y_nms_ppd,
+                      "log-posterior")
+
+    init_fit  <- replace_stanfit_nms(init_fit, init_nms_all)
+    init_mat  <- t(colMeans(am(init_fit))) # posterior means
+    init_nms  <- collect_nms(colnames(init_mat), M, stub = "Long")
+    init_beta <- lapply(1:M, function(m) init_mat[, init_nms$y[[m]]])
+    init_b    <- lapply(1:M, function(m) {
+      # can drop _NEW_ groups since they are not required for generating
+      # the assoc_terms that are used in scaling the priors for
+      # the association parameters (ie. the Zt matrix returned by the
+      # function 'make_assoc_parts_for_stan' will not be padded).
+      b <- init_mat[, init_nms$y_b[[m]]]
+      b[!grepl("_NEW_", names(b), fixed = TRUE)]
+    })
+
+
+    if (is.character(init) && (init =="prefit"))
+      init <- lapply(seq_len(n_trans), function(j)
+        get_prefit_inits2(init_fit = init_fit,
+                          e_mod = ms_mod[[j]],
+                          prior_stuff = ms_prior_stuff[[j]],
+                          prior_aux_stuff = ms_prior_aux_stuff[[j]],
+                          standata = standata) )
+    #----------- Prior distributions -----------#
+
+    # Priors for association parameters
+    e_user_prior_assoc_stuff <- e_prior_assoc_stuff <-
+      mapply( FUN = handle_glm_prior,
+              prior = priorEvent_assoc,
+              nvars = a_K,
+              MoreArgs = nlist(default_scale = 2.5,
+                               link          = NULL,
+                               ok_dists      = ok_dists)
+                       )
+
+    # Autoscaling of priors
+    for(i in seq_len(n_trans)){
+      if (a_K[[i]]) {
+        e_prior_assoc_stuff <- autoscale_prior(e_prior_assoc_stuff[,i],
+                                               family = family,
+                                               assoc  = assoc,
+                                               parts  = a_mod,
+                                               beta   = init_beta,
+                                               b      = init_b)
+      }
     }
 
 
@@ -1394,6 +1472,6 @@ msjm_stan <- function(formulaLong,
 # ------ Internal
 # -------------------
 
-get_timestart <- function(d, t) {
+handle_timestart <- function(d, t) {
   return(d[[t]])
 }

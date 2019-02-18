@@ -788,6 +788,9 @@ handle_e_mod2 <- function(formula, data, meta, j) {
   # calculate mean log incidence, used as a shift in log baseline hazard
   norm_const <- log(nevent / sum(t_end - t_beg))
 
+  # get time start for initial, intermidiate and absorving states
+  t_state = data[ ,time_start]
+
   nlist(mod,
         surv_type = formula$surv_type,
         qnodes,
@@ -806,6 +809,7 @@ handle_e_mod2 <- function(formula, data, meta, j) {
         t_lcens,
         t_lower,
         t_upper,
+        t_state,
         status,
         nevent,
         nrcens,
@@ -1159,6 +1163,9 @@ handle_ms_mod <- function(formula, data, meta) {
   # calculate mean log incidence, used as a shift in log baseline hazard
   norm_const <- log(nevent / sum(eventtime - entrytime))
 
+  # get time start for initial, intermidiate and absorving states
+  t_state = data[ ,time_start]
+
   nlist(mod,
         surv_type = formula$surv_type,
         qnodes,
@@ -1179,6 +1186,7 @@ handle_ms_mod <- function(formula, data, meta) {
         t_icenl,
         t_icenu,
         t_delay,
+        t_state,
         time_start,
         nevent,
         nlcens,
@@ -2418,7 +2426,7 @@ get_extra_grp_info <- function(basic_info, flist, id_var, grp_assoc,
 # @param auc_qnodes Integer specifying the number of GK quadrature nodes to
 #   use in the integral/AUC based association structures.
 # @return The list returned by make_assoc_parts.
-handle_assocmod2 <- function(data, assoc, y_mod, e_mod, grp_stuff, meta) {
+handle_assocmod2 <- function(data, assoc, y_mod, e_mod, grp_stuff, meta, j) {
 
   if (!requireNamespace("data.table"))
     stop2("the 'data.table' package must be installed to use this function.")
@@ -2434,12 +2442,20 @@ handle_assocmod2 <- function(data, assoc, y_mod, e_mod, grp_stuff, meta) {
   fm <- reformulate(tt, response = NULL)
   df <- get_all_vars(fm, data)
   df <- df[complete.cases(df), , drop = FALSE]
+  df <- df[e_mod$assoc_obs, ]
 
   # declare df as a data.table for merging with quadrature points
   dt <- prepare_data_table(df,
                            id_var   = id_var,
                            time_var = time_var,
                            grp_var  = grp_stuff$grp_var) # grp_var may be NULL
+  ids_ <- seq_along( promote_to_factor(unique(df[ ,id_var])) )
+
+  time_state <-  e_mod$cpts + suppressMessages(dplyr::left_join(
+    data.frame(id = e_mod$cids),
+    data.frame(id = ids_,
+               t = e_mod$t_state)
+                              ))$t
 
   # design matrices for calculating association structure based on
   # (possibly lagged) eta, slope, auc and any interactions with data
@@ -2447,11 +2463,780 @@ handle_assocmod2 <- function(data, assoc, y_mod, e_mod, grp_stuff, meta) {
                newdata      = dt,
                y_mod        = y_mod,
                grp_stuff    = grp_stuff,
-               meta         = meta,
+               meta_stuff   = meta,
                assoc        = assoc,
                ids          = e_mod$cids,
-               times        = e_mod$cpts)
+               times        = time_state,
+               j            = j)
+  return(args)
 
-  do.call(make_assoc_parts, args)
+  do.call(make_assoc_parts2, args)
 }
 
+# Function to construct quantities, primarily design matrices (x, Zt), that
+# will be used to evaluate the longitudinal submodel contributions to the
+# association structure in the event submodel. For example, the design matrices
+# evaluated at the quadpoints, quadpoints + eps, lagged quadpoints, auc quadpoints,
+# and so on. Exactly what quantities are returned depends on what is specified
+# in the use_function argument.
+#
+# @param use_function The function to call which will return the design
+#   matrices for eta, eps, lag, auc, etc. Generally either
+#   'make_assoc_parts_for_stan' or 'pp_data'.
+# @param newdata A model frame used for constructing the design matrices
+# @param assoc A list with information about the association structure for
+#   the one longitudinal submodel.
+# @param grp_stuff A list with information about any lower level grouping
+#   factors that are clustered within patients and how to handle them in
+#   the association structure.
+# @param ids,times The subject IDs and times vectors that correspond to the
+#   event/censoring and quadrature times at which the design matrices will
+#   need to be evaluated for the association structure.
+# @param id_var The name on the ID variable.
+# @param time_var The name of the time variable.
+# @param epsilon The half-width of the central difference used for
+#   numerically calculating the derivative of the design matrix for slope
+#   based association structures.
+# @param auc_qnodes Integer specifying the number of GK quadrature nodes to
+#   use in the integral/AUC based association structures.
+# @param ... Additional arguments passes to use_function
+# @return A named list
+make_assoc_parts2 <- function(use_function = make_assoc_parts_for_stan,
+                             newdata, assoc, grp_stuff, meta_stuff,
+                             ids, times, j, ...) {
+
+  if (!requireNamespace("data.table"))
+    stop("the 'data.table' package must be installed to use this function")
+
+  id_var     <- meta_stuff$id_var
+  time_var   <- meta_stuff$time_var
+  epsilon    <- meta_stuff$epsilon
+  auc_qnodes <- meta_stuff$auc_qnodes[j]
+
+  eps_uses_derivative_of_x <- TRUE # experimental
+
+  # Apply lag
+  lag <- assoc[["which_lag"]]
+  if (!lag == 0)
+    times <- set_lag(times, lag)
+
+  # Broadcast ids and times if there is lower level clustering
+  if (grp_stuff$has_grp) {
+    # grps corresponding to each id
+    grps <- as.vector(unlist(grp_stuff$grp_list[as.character(ids)]))
+    # freq by which to expand each ids and times element
+    freq_seq <- grp_stuff$grp_freq[as.character(ids)]
+    # rep each patient id and prediction time the required num of times
+    ids   <- rep(ids,   freq_seq)
+    times <- rep(times, freq_seq)
+    # indices for collapsing across clusters within patients
+    grp_idx <- get_idx_array(freq_seq)
+  } else grps <- grp_idx <- NULL
+
+  # Identify row in longitudinal data closest to event time or quadrature point
+  #   NB if the quadrature point is earlier than the first observation time,
+  #   then covariates values are carried back to avoid missing values.
+  #   In any other case, the observed covariates values from the most recent
+  #   observation time preceeding the quadrature point are carried forward to
+  #   represent the covariate value(s) at the quadrature point. (To avoid
+  #   missingness there is no limit on how far forwards or how far backwards
+  #   covariate values can be carried). If no time varying covariates are
+  #   present in the longitudinal submodel (other than the time variable)
+  #   then nothing is carried forward or backward.
+  dataQ <- rolling_merge(data = newdata, ids = ids, times = times, grps = grps)
+  mod_eta <- use_function(newdata = dataQ, ...)
+
+  # If association structure is based on slope, then calculate design
+  # matrices under a time shift of epsilon
+  sel_slope <- grep("etaslope", names(assoc))
+  if (any(unlist(assoc[sel_slope]))) {
+    if (eps_uses_derivative_of_x) {
+      # slope is evaluated by passing Stan the derivatives of the X and Z
+      # design matrices directly, each evaluated using central differences
+      # with a half-width equal to epsilon
+      dataQ_pos <- dataQ_neg <- dataQ
+      dataQ_neg[[time_var]] <- dataQ_neg[[time_var]] - epsilon
+      dataQ_pos[[time_var]] <- dataQ_pos[[time_var]] + epsilon
+      mod_neg <- use_function(newdata = dataQ_neg, ...)
+      mod_pos <- use_function(newdata = dataQ_pos, ...)
+      mod_eps <- mod_pos
+      mod_eps$x     <- (mod_pos$x     - mod_neg$x    ) / (2 * epsilon) # derivative of x
+      mod_eps$xtemp <- (mod_pos$xtemp - mod_neg$xtemp) / (2 * epsilon) # derivative of centered x?
+      mod_eps$z <- xapply(mod_pos$z, mod_neg$z,                        # derivative of z
+                          FUN = function(x, y) (x - y) / (2 * epsilon))
+      if (!is.null(mod_eps$Zt))
+        mod_eps$Zt <- (mod_pos$Zt - mod_neg$Zt) / (2 * epsilon)
+    } else {
+      # slope is evaluated by passing Stan the X and Z design matrices under
+      # a time shift of epsilon and then evaluating the derivative of the
+      # linear predictor in Stan using a one-sided difference
+      dataQ_eps <- dataQ
+      dataQ_eps[[time_var]] <- dataQ_eps[[time_var]] + epsilon
+      mod_eps <- use_function(newdata = dataQ_eps, ...)
+    }
+  } else mod_eps <- NULL
+
+  # If association structure is based on area under the marker trajectory, then
+  # calculate design matrices at the subquadrature points
+  sel_auc <- grep("etaauc|muauc", names(assoc))
+  if (any(unlist(assoc[sel_auc]))) {
+    if (grp_stuff$has_grp)
+      stop2("'etaauc' and 'muauc' not yet implemented when there is a grouping ",
+            "factor clustered within patients.")
+    # Return a design matrix that is (qnodes * auc_qnodes * Npat) rows
+    auc_qpts <- uapply(times, function(x)
+      lapply(get_quadpoints(auc_qnodes)$points, unstandardise_qpts, 0, x))
+    auc_qwts <- uapply(times, function(x)
+      lapply(get_quadpoints(auc_qnodes)$weights, unstandardise_qwts, 0, x))
+    ids2 <- rep(ids, each = auc_qnodes)
+    dataQ_auc <- rolling_merge(data = newdata, ids = ids2, times = auc_qpts)
+    mod_auc <- use_function(newdata = dataQ_auc, ...)
+  } else mod_auc <- auc_qpts <- auc_qwts <- NULL
+
+  # If association structure is based on interactions with data, then calculate
+  # the design matrix which will be multiplied by etavalue, etaslope, muvalue or muslope
+  sel_data <- grep("_data", names(assoc), value = TRUE)
+  X_data <- xapply(sel_data, FUN = function(i) {
+    form <- assoc[["which_formulas"]][[i]]
+    if (length(form)) {
+      form <- as.formula(form)
+      vars <- rownames(attr(terms.formula(form), "factors"))
+      if (is.null(vars))
+        stop2("No variables found in the formula for the '", i, "' association structure.")
+      sel <- which(!vars %in% colnames(dataQ))
+      if (length(sel))
+        stop2("The following variables were specified in the formula for the '", i,
+              "' association structure, but they cannot be found in the data: ",
+              paste0(vars[sel], collapse = ", "))
+      mf <- stats::model.frame(form, data = dataQ)
+      X <- stats::model.matrix(form, data = mf)
+      X <- drop_intercept(X)
+      if (!ncol(X))
+        stop2("Bug found: A formula was specified for the '", i, "' association ",
+              "structure, but the resulting design matrix has no columns.")
+    } else {
+      X <- matrix(0, nrow(dataQ), 0)
+    }
+    X
+  })
+  K_data <- sapply(X_data, ncol)
+  X_bind_data <- do.call(cbind, X_data)
+
+  ret <- nlist(times, mod_eta, mod_eps, mod_auc, K_data, X_data, X_bind_data, grp_stuff)
+
+  structure(ret,
+            times      = times,
+            lag        = lag,
+            epsilon    = epsilon,
+            grp_idx    = grp_idx,
+            auc_qnodes = auc_qnodes,
+            auc_qpts   = auc_qpts,
+            auc_qwts   = auc_qwts,
+            eps_uses_derivative_of_x = eps_uses_derivative_of_x)
+}
+
+# Return design matrices for the longitudinal submodel. This is
+# designed to generate the design matrices evaluated at the GK
+# quadrature points, because it uses a 'terms' object to generate
+# the model frame, and that terms object should have been generated
+# from the longitudinal submodel's model frame when it was evaluated
+# at the observation times; i.e. the predvars and X_bar would have
+# come from the design matrices at the observation times, not the
+# quadrature points.
+#
+# @param newdata A data frame; the data for the longitudinal submodel
+#   at the event and quadrature points.
+# @param y_mod The list returned by handle_y_mod, containing info about
+#   the longitudinal submodel evaluated at the observation (not quadrature)
+#   times, for example, the x_bar means used for centering, the predvars
+#   attribute for the longitudinal submodel formula, and so on.
+# @param include_Zt Whether to include the sparse Zt matrix in the
+#   returned parts.
+make_assoc_parts_for_stan <- function(newdata, y_mod, include_Zt = TRUE) {
+
+  # construct model frame using predvars
+  formula     <- use_predvars(y_mod, keep_response = FALSE)
+  data        <- as.data.frame(newdata)
+  model_frame <- stats::model.frame(lme4::subbars(formula), data)
+
+  # fe design matrices
+  x_form <- lme4::nobars(formula)
+  x <- model.matrix(x_form, model_frame)
+  xtemp <- drop_intercept(x)
+  x_bar <- y_mod$x$x_bar
+  xtemp <- sweep(xtemp, 2, x_bar, FUN = "-")
+
+  # re design matrices
+  bars <- lme4::findbars(formula)
+  if (length(bars) > 2L)
+    stop2("A maximum of 2 grouping factors are allowed.")
+  z_parts <- lapply(bars, split_at_bars)
+  z_forms <- fetch(z_parts, "re_form")
+  z <- lapply(z_forms, model.matrix, model_frame)
+  group_vars <- fetch(z_parts, "group_var")
+  group_list <- lapply(group_vars, function(x) factor(model_frame[[x]]))
+  names(z) <- names(group_list) <- group_vars
+
+  ret <- nlist(x, xtemp, z, group_list, group_vars) # return list
+
+  # optionally add the sparse Zt matrix
+  if (include_Zt)
+    ret$Zt <- lme4::mkReTrms(bars, model_frame)$Zt
+
+  ret
+}
+
+
+# Function to substitute variables in the formula of a fitted model
+# with the corresponding predvars based on the terms object for the model.
+# (This is useful since lme4::glFormula doesn't allow a terms object to be
+# passed as the first argument instead of a model formula).
+#
+# @param mod A (g)lmer model object from which to extract the formula and terms
+# @return A reformulated model formula with variables replaced by predvars
+use_predvars <- function(mod, keep_response = TRUE) {
+  fm <- formula(mod)
+  ff <- lapply(attr(terms(mod, fixed.only  = TRUE), "variables"), deparse, 500)[-1]
+  fr <- lapply(attr(terms(mod, random.only = TRUE), "variables"), deparse, 500)[-1]
+  pf <- lapply(attr(terms(mod, fixed.only  = TRUE), "predvars"),  deparse, 500)[-1]
+  pr <- lapply(attr(terms(mod, random.only = TRUE), "predvars"),  deparse, 500)[-1]
+  if (!identical(c(ff, fr), c(pf, pr))) {
+    for (j in 1:length(ff))
+      fm <- gsub(ff[[j]], pf[[j]], fm, fixed = TRUE)
+    for (j in 1:length(fr))
+      fm <- gsub(fr[[j]], pr[[j]], fm, fixed = TRUE)
+  }
+  rhs <- fm[[length(fm)]]
+  if (is(rhs, "call"))
+    rhs <- deparse(rhs, 500L)
+  if (keep_response && length(fm) == 3L) {
+    fm <- reformulate(rhs, response = formula(mod)[[2L]])
+  } else if (keep_response && length(fm) == 2L) {
+    warning2("No response variable found, reformulating RHS only.")
+    fm <- reformulate(rhs, response = NULL)
+  } else {
+    fm <- reformulate(rhs, response = NULL)
+  }
+  fm
+}
+
+# Function to calculate the number of association parameters in the model
+#
+# @param assoc A list of length M with information about the association structure
+#   type for each submodel, returned by an mapply call to validate_assoc
+# @param a_mod_stuff A list of length M with the design matrices related to
+#   the longitudinal submodels in the GK quadrature, returned by an mapply
+#   call to handle_assocmod
+# @return Integer indicating the number of association parameters in the model
+get_num_assoc_pars <- function(assoc, a_mod_stuff) {
+  sel1 <- c("etavalue", "etaslope", "etaauc",
+            "muvalue", "muslope", "muauc")
+  sel2 <- c("which_b_zindex", "which_coef_zindex")
+  sel3 <- c("which_interactions")
+  K1 <- sum(as.integer(assoc[sel1,]))
+  K2 <- length(unlist(assoc[sel2,]))
+  K3 <- length(unlist(assoc[sel3,]))
+  K4 <- sum(fetch_(a_mod_stuff, "K_data"))
+  K1 + K2 + K3 + K4
+}
+
+
+# Return the list of pars for Stan to monitor
+#
+# @param standata The list of data to pass to Stan
+# @param is_jm A logical
+# @return A character vector
+pars_to_monitor <- function(standata, is_jm = FALSE) {
+  c(if (standata$M > 0 && standata$intercept_type[1]) "yAlpha1",
+    if (standata$M > 1 && standata$intercept_type[2]) "yAlpha2",
+    if (standata$M > 2 && standata$intercept_type[3]) "yAlpha3",
+    if (standata$M > 0 && standata$yK[1]) "yBeta1",
+    if (standata$M > 1 && standata$yK[2]) "yBeta2",
+    if (standata$M > 2 && standata$yK[3]) "yBeta3",
+    if (is_jm) "e_alpha",
+    if (is_jm && standata$e_K) "e_beta",
+    if (is_jm && standata$a_K) "a_beta",
+    if (standata$bK1 > 0) "b1",
+    if (standata$bK2 > 0) "b2",
+    if (standata$M > 0 && standata$has_aux[1]) "yAux1",
+    if (standata$M > 1 && standata$has_aux[2]) "yAux2",
+    if (standata$M > 2 && standata$has_aux[3]) "yAux3",
+    if (is_jm && length(standata$basehaz_nvars)) "e_aux",
+    if (standata$prior_dist_for_cov == 2 && standata$bK1 > 0) "bCov1",
+    if (standata$prior_dist_for_cov == 2 && standata$bK2 > 0) "bCov2",
+    if (standata$prior_dist_for_cov == 1 && standata$len_theta_L) "theta_L",
+    "mean_PPD")
+}
+
+
+#--------------- Functions related to generating initial values
+
+# Create a function that can be used to generate the model-based initial values for Stan
+#
+# @param e_mod_stuff A list object returned by a call to the handle_coxmod function
+# @param standata The data list that will be passed to Stan
+get_prefit_inits2 <- function(init_fit, e_mod, prior_stuff, prior_aux_stuff, standata) {
+
+  init_means <- rstan::get_posterior_mean(init_fit)
+  init_nms   <- rownames(init_means)
+  inits <- generate_init_function2(e_mod, prior_stuff, prior_aux_stuff)()
+
+  sel_b1 <- grep(paste0("^z_bMat1\\."), init_nms)
+  if (length(sel_b1))
+    inits[["z_bMat1"]] <- matrix(init_means[sel_b1,], nrow = standata$bK1)
+
+  sel_b2 <- grep(paste0("^z_bMat2\\."), init_nms)
+  if (length(sel_b2))
+    inits[["z_bMat2"]] <- matrix(init_means[sel_b2,], nrow = standata$bK2)
+
+  sel_bC1 <- grep(paste0("^bCholesky1\\."), init_nms)
+  if (length(sel_bC1) > 1) {
+    inits[["bCholesky1"]] <- matrix(init_means[sel_bC1,], nrow = standata$bK1)
+  } else if (length(sel_bC1) == 1) {
+    inits[["bCholesky1"]] <- aa(init_means[sel_bC1,])
+  }
+
+  sel_bC2 <- grep(paste0("^bCholesky2\\."), init_nms)
+  if (length(sel_bC2) > 1) {
+    inits[["bCholesky2"]] <- matrix(init_means[sel_bC2,], nrow = standata$bK2)
+  } else if (length(sel_bC1) == 1) {
+    inits[["bCholesky2"]] <- aa(init_means[sel_bC2,])
+  }
+
+  sel <- c("yGamma1", "yGamma2", "yGamma3",
+           "z_yBeta1", "z_yBeta2", "z_yBeta3",
+           "yAux1_unscaled", "yAux2_unscaled", "yAux3_unscaled",
+           "bSd1", "bSd2", "z_b", "z_T", "rho", "zeta", "tau",
+           "yGlobal1", "yGlobal2", "yGlobal3",
+           "yLocal1", "yLocal2", "yLocal3",
+           "yMix1", "yMix2", "yMix3",
+           "yOol1", "yOol2", "yOol3")
+  for (i in sel) {
+    sel_i <- grep(paste0("^", i, "\\."), init_nms)
+    if (length(sel_i))
+      inits[[i]] <- aa(init_means[sel_i,])
+  }
+  return(function() inits)
+}
+
+generate_init_function2 <- function(e_mod_stuff, prior_stuff, prior_aux_stuff) {
+
+  # Initial values for intercepts, coefficients and aux parameters
+  if (e_mod_stuff$surv_type %in% c("right", "counting")) {
+    e_beta <- e_mod_stuff$mod$coef
+  } else if (e_mod_stuff$surv_type %in% c("interval", "interval2")) {
+    e_beta <- -drop_intercept(e_mod_stuff$mod$coef) * e_mod_stuff$mod$scale
+  } else {
+    stop("Bug found: Invalid Surv type.")
+  }
+  e_aux <- if (e_mod_stuff$basehaz$type == 1L) runif(1, 0.5, 3) else rep(0, e_mod_stuff$basehaz$nvars)
+  e_z_beta       <- standardise_coef(x        = e_beta,
+                                     location = prior_stuff$prior_mean,
+                                     scale    = prior_stuff$e_prior_scale)
+  e_aux_unscaled <- standardise_coef(x        = e_aux,
+                                     location = prior_aux_stuff$prior_mean_for_aux,
+                                     scale    = prior_aux_stuff$prior_scale_for_aux)
+
+  # Function to generate model based initial values
+  model_based_inits <- rm_null(list(
+    e_z_beta       = array_else_double(e_z_beta),
+    e_aux_unscaled = array_else_double(e_aux_unscaled),
+    e_gamma        = array_else_double(rep(0, e_mod_stuff$has_intercept))))
+
+  return(function() model_based_inits)
+}
+
+
+# Function to construct a design matrix for the association structure in
+# the event submodel, to be multiplied by a vector of association parameters
+#
+# @param assoc An array with information about the desired association
+#   structure, returned by a call to validate_assoc.
+# @param parts A list equal in length to the number of markers. Each element
+#   parts[[m]] should contain a named list with components $mod_eta, $mod_eps,
+#   $mod_auc, etc, which each contain either the linear predictor at quadtimes,
+#   quadtimes + eps, and auc quadtimes, or the design matrices
+#   used for constructing the linear predictor. Each element parts[[m]] should
+#   also contain $X_data and $K_data.
+# @param family A list of family objects, equal in length to the number of
+#   longitudinal submodels.
+# @param ... If parts does not contain the linear predictors, then this should
+#   include elements beta and b, each being a length M list of parameters for the
+#   longitudinal submodels.
+# @return A design matrix containing the association terms to be multiplied by
+#   the association paramters.
+make_assoc_terms <- function(parts, assoc, family, ...) {
+  M <- length(parts)
+  a_X <- list()
+  mark <- 1
+  for (m in 1:M) {
+    times   <- attr(parts[[m]], "times")
+    epsilon <- attr(parts[[m]], "epsilon")
+    qnodes  <- attr(parts[[m]], "auc_qnodes")
+    qwts    <- attr(parts[[m]], "auc_qwts")
+
+    eps_uses_derivative_of_x <-
+      attr(parts[[m]], "eps_uses_derivative_of_x") # experimental
+
+    has_assoc <- !assoc["null",][[m]]
+
+    if (has_assoc) {
+      assoc_m   <- assoc[,m]
+      invlink_m <- family[[m]]$linkinv
+      eta_m    <- get_element(parts, m = m, "eta", ...)
+      eps_m    <- get_element(parts, m = m, "eps", ...)
+      auc_m    <- get_element(parts, m = m, "auc", ...)
+      X_data_m <- get_element(parts, m = m, "X_data", ...)
+      K_data_m <- get_element(parts, m = m, "K_data", ...)
+      grp_m    <- get_element(parts, m = m, "grp_stuff", ...)
+
+      has_grp   <- grp_m$has_grp # TRUE/FALSE
+      if (has_grp) {
+        # method for collapsing information across clusters within patients
+        grp_assoc <- grp_m$grp_assoc
+        # indexing for collapsing across grps (based on the ids and times
+        # used to generate the design matrices in make_assoc_parts)
+        grp_idx <- attr(parts[[m]], "grp_idx")
+      }
+
+      #---  etavalue and any interactions  ---#
+
+      # etavalue
+      if (assoc_m[["etavalue"]]) {
+        if (has_grp) {
+          a_X[[mark]] <- collapse_within_groups(eta_m, grp_idx, grp_assoc)
+        } else {
+          a_X[[mark]] <- eta_m
+        }
+        mark <- mark + 1
+      }
+
+      # etavalue * data interactions
+      if (assoc_m[["etavalue_data"]]) {
+        X_temp <- X_data_m[["etavalue_data"]]
+        K_temp <- K_data_m[["etavalue_data"]]
+        for (i in 1:K_temp) {
+          if (is.matrix(eta_m)) {
+            val <- sweep(eta_m, 2L, X_temp[, i], `*`)
+          } else {
+            val <- as.vector(eta_m) * X_temp[, i]
+          }
+          if (has_grp) {
+            a_X[[mark]] <- collapse_within_groups(val, grp_idx, grp_assoc)
+          } else {
+            a_X[[mark]] <- val
+          }
+          mark <- mark + 1
+        }
+      }
+
+      # etavalue * etavalue interactions
+      if (assoc_m[["etavalue_etavalue"]]) {
+        sel <- assoc_m[["which_interactions"]][["etavalue_etavalue"]]
+        for (j in sel) {
+          eta_j <- get_element(parts, m = j, "eta", ...)
+          val <- eta_m * eta_j
+          a_X[[mark]] <- val
+          mark <- mark + 1
+        }
+      }
+
+      # etavalue * muvalue interactions
+      if (assoc_m[["etavalue_muvalue"]]) {
+        sel <- assoc_m[["which_interactions"]][["etavalue_muvalue"]]
+        for (j in sel) {
+          eta_j <- get_element(parts, m = j, "eta", ...)
+          invlink_j <- family[[j]]$linkinv
+          val <- eta_m * invlink_j(eta_j)
+          a_X[[mark]] <- val
+          mark <- mark + 1
+        }
+      }
+
+      #---  etaslope and any interactions  ---#
+
+      if (assoc_m[["etaslope"]] || assoc_m[["etaslope_data"]]) {
+        if (eps_uses_derivative_of_x) {
+          deta_m <- eps_m
+        } else {
+          deta_m <- (eps_m - eta_m) / epsilon
+        }
+      }
+
+      # etaslope
+      if (assoc_m[["etaslope"]]) {
+        if (has_grp) {
+          a_X[[mark]] <- collapse_within_groups(deta_m, grp_idx, grp_assoc)
+        } else {
+          a_X[[mark]] <- deta_m
+        }
+        mark <- mark + 1
+      }
+
+      # etaslope * data interactions
+      if (assoc_m[["etaslope_data"]]) {
+        X_temp <- X_data_m[["etaslope_data"]]
+        K_temp <- K_data_m[["etaslope_data"]]
+        for (i in 1:K_temp) {
+          if (is.matrix(deta_m)) {
+            val <- sweep(deta_m, 2L, X_temp[, i], `*`)
+          } else {
+            val <- as.vector(deta_m) * X_temp[, i]
+          }
+          if (has_grp) {
+            a_X[[mark]] <- collapse_within_groups(val, grp_idx, grp_assoc)
+          } else {
+            a_X[[mark]] <- val
+          }
+          mark <- mark + 1
+        }
+      }
+
+      #---  etaauc  ---#
+
+      if (assoc_m[["etaauc"]]) {
+        if (is.matrix(eta_m)) {
+          nr <- nrow(eta_m)
+          nc <- ncol(eta_m)
+          val   <- matrix(NA, nrow = nr, ncol = nc)
+          for (j in 1:nc) {
+            wgt_j <- qwts[((j-1) * qnodes + 1):(j * qnodes)]
+            auc_j <- auc_m[, ((j-1) * qnodes + 1):(j * qnodes), drop = FALSE]
+            tmp_j <- sweep(auc_j, 2L, wgt_j, `*`)
+            val[,j] <- rowSums(tmp_j)
+          }
+        } else {
+          val <- c()
+          for (j in 1:length(eta_m)) {
+            wgt_j <- qwts[((j-1) * qnodes + 1):(j * qnodes)]
+            auc_j <- auc_m[((j-1) * qnodes + 1):(j * qnodes)]
+            val[j] <- sum(wgt_j * auc_j)
+          }
+        }
+        a_X[[mark]] <- val
+        mark <- mark + 1
+      }
+
+      #---  muvalue and any interactions  ---#
+
+      # muvalue
+      if (assoc_m[["muvalue"]]) {
+        mu_m <- invlink_m(eta_m)
+        a_X[[mark]] <- mu_m
+        mark <- mark + 1
+      }
+
+      # muvalue * data interactions
+      if (assoc_m[["muvalue_data"]]) {
+        mu_m <- invlink_m(eta_m)
+        X_temp <- X_data_m[["muvalue_data"]]
+        K_temp <- K_data_m[["muvalue_data"]]
+        for (i in 1:K_temp) {
+          if (is.matrix(mu_m)) {
+            val <- sweep(mu_m, 2L, X_temp[, i], `*`)
+          } else {
+            val <- as.vector(mu_m) * X_temp[, i]
+          }
+          if (has_grp) {
+            a_X[[mark]] <- collapse_within_groups(val, grp_idx, grp_assoc)
+          } else {
+            a_X[[mark]] <- val
+          }
+          mark <- mark + 1
+        }
+      }
+
+      # muvalue * etavalue interactions
+      if (assoc_m[["muvalue_etavalue"]]) {
+        sel <- assoc_m[["which_interactions"]][["muvalue_etavalue"]]
+        for (j in sel) {
+          eta_j <- get_element(parts, m = j, "eta", ...)
+          val   <- invlink_m(eta_m) * eta_j
+          a_X[[mark]] <- val
+          mark <- mark + 1
+        }
+      }
+
+      # muvalue * muvalue interactions
+      if (assoc_m[["muvalue_muvalue"]]) {
+        sel <- assoc_m[["which_interactions"]][["muvalue_muvalue"]]
+        for (j in sel) {
+          eta_j <- get_element(parts, m = j, "eta", ...)
+          invlink_j <- family[[j]]$linkinv
+          val <- invlink_m(eta_m) * invlink_j(eta_j)
+          a_X[[mark]] <- val
+          mark <- mark + 1
+        }
+      }
+
+      #---  muslope and any interactions  ---#
+
+      if (assoc_m[["muslope"]] || assoc_m[["muslope_data"]]) {
+        if (eps_uses_derivative_of_x) {
+          stop2("Cannot currently use muslope interaction structure.")
+        } else {
+          dmu_m <- (invlink_m(eps_m) - invlink_m(eta_m)) / epsilon
+        }
+      }
+
+      # muslope
+      if (assoc_m[["muslope"]]) {
+        a_X[[mark]] <- dmu_m
+        mark <- mark + 1
+      }
+
+      # muslope * data interactions
+      if (assoc_m[["muslope_data"]]) {
+        X_temp <- X_data_m[["muslope_data"]]
+        K_temp <- K_data_m[["muslope_data"]]
+        for (i in 1:K_temp) {
+          if (is.matrix(dmu_m)) {
+            val <- sweep(dmu_m, 2L, X_temp[, i], `*`)
+          } else {
+            val <- as.vector(dmu_m) * X_temp[, i]
+          }
+          if (has_grp) {
+            a_X[[mark]] <- collapse_within_groups(val, grp_idx, grp_assoc)
+          } else {
+            a_X[[mark]] <- val
+          }
+          mark <- mark + 1
+        }
+      }
+
+      #---  muauc  ---#
+
+      if (assoc_m[["muauc"]]) {
+        if (is.matrix(eta_m)) {
+          nr <- nrow(eta_m)
+          nc <- ncol(eta_m)
+          val   <- matrix(NA, nrow = nr, ncol = nc)
+          for (j in 1:nc) {
+            wgt_j <- qwts[((j-1) * qnodes + 1):(j * qnodes)]
+            auc_j <- invlink_m(auc_m[, ((j-1) * qnodes + 1):(j * qnodes), drop = FALSE])
+            tmp_j <- sweep(auc_j, 2L, wgt_j, `*`)
+            val[,j] <- rowSums(tmp_j)
+          }
+        } else {
+          val <- c()
+          for (j in 1:length(eta_m)) {
+            wgt_j <- qwts[((j-1) * qnodes + 1):(j * qnodes)]
+            auc_j <- invlink_m(auc_m[((j-1) * qnodes + 1):(j * qnodes)])
+            val[j] <- sum(wgt_j * auc_j)
+          }
+        }
+        a_X[[mark]] <- val
+        mark <- mark + 1
+      }
+
+    }
+  }
+  for (m in 1:M) {
+    # shared_b
+    if (assoc["shared_b",][[m]]) {
+      sel <- assoc["which_b_zindex",][[m]]
+      val <- get_element(parts, m = m, "b_mat", ...)[,sel]
+      a_X[[mark]] <- val
+      mark <- mark + 1
+    }
+  }
+  for (m in 1:M) {
+    # shared_coef
+    if (assoc["shared_coef",][[m]]) {
+      sel <- assoc["which_coef_zindex",][[m]]
+      val <- get_element(parts, m = m, "b_mat", ...)[,sel]
+      a_X[[mark]] <- val
+      mark <- mark + 1
+    }
+  }
+
+  if (is.matrix(a_X[[1L]])) a_X else do.call("cbind", a_X)
+}
+
+# Function to get an "element" (e.g. a linear predictor, a linear predictor
+# evaluated at epsilon shift, linear predictor evaluated at auc quadpoints,
+# etc) constructed from the "parts" (e.g. mod_eta, mod_eps, mod_auc, etc)
+# returned by a call to the function 'make_assoc_parts'.
+#
+# @param parts A named list containing the parts for constructing the association
+#   structure. It may contain elements $mod_eta, $mod_eps, $mod_auc, etc. as
+#   well as $X_data, $K_data, $grp_stuff. It is returned by a call to the
+#   function 'make_assoc_parts'.
+# @param m An integer specifying which submodel to get the element for.
+# @param which A character string specifying which element to get.
+get_element <- function(parts, m = 1, which = "eta", ...) {
+
+  ok_which_args <- c("eta", "eps", "auc", "X_data", "K_data",
+                     "b_mat", "grp_stuff")
+  if (!which %in% ok_which_args)
+    stop("'which' must be one of: ", paste(ok_which_args, collapse = ", "))
+
+  if (which %in% c("eta", "eps", "auc")) {
+    part <- parts[[m]][[paste0("mod_", which)]]
+    if (is.null(part)) {
+      # model doesn't include an assoc related to 'which'
+      return(NULL)
+    } else {
+      # construct linear predictor for the 'which' part
+      x <- part$x
+      Zt <- part$Zt
+      Znames  <- part$Z_names
+      if (is.null(x) || is.null(Zt))
+        stop2("Bug found: cannot find x and Zt in 'parts'. They are ",
+              "required to build the linear predictor for '", which, "'.")
+
+      dots <- list(...)
+      beta <- dots$beta[[m]]
+      b    <- dots$b[[m]]
+      if (is.null(beta) || is.null(b))
+        stop2("Bug found: beta and b must be provided to build the ",
+              "linear predictor for '", which, "'.")
+
+      eta <- linear_predictor(beta, x)
+      if (NCOL(b) == 1) {
+        eta <- eta + as.vector(b %*% Zt)
+      } else {
+        eta <- eta + as.matrix(b %*% Zt)
+      }
+      return(eta)
+    }
+  } else if (which %in% c("X_data", "K_data", "b_mat", "grp_stuff")) {
+    return(parts[[m]][[which]])
+  } else {
+    stop("'which' argument doesn't include a valid entry.")
+  }
+}
+
+# Collapse the linear predictor across the lower level units
+# clustered an individual, using the function specified in the
+# 'grp_assoc' argument
+#
+# @param eta The linear predictor evaluated for all lower level groups
+#   at the quadrature points.
+# @param grp_idx An N*2 array providing the indices of the first (col 1)
+#   and last (col 2) observations in eta that correspond to individuals
+#   i = 1,...,N.
+# @param grp_assoc Character string, the function to use to collapse
+#   across the lower level units clustered within individuals.
+# @return A vector or matrix, depending on the method called.
+collapse_within_groups <- function(eta, grp_idx, grp_assoc = "sum") {
+  UseMethod("collapse_within_groups")
+}
+collapse_within_groups.default <- function(eta, grp_idx, grp_assoc) {
+  N <- nrow(grp_idx)
+  val <- rep(NA, N)
+  for (n in 1:N) {
+    tmp <- eta[grp_idx[n,1]:grp_idx[n,2]]
+    val[n] <- do.call(grp_assoc, list(tmp))
+  }
+  val
+}
+collapse_within_groups.matrix <- function(eta, grp_idx, grp_assoc) {
+  N <- nrow(grp_idx)
+  val <- matrix(NA, nrow = nrow(eta), ncol = N)
+  for (n in 1:N) {
+    tmp <- eta[, grp_idx[n,1]:grp_idx[n,2], drop = FALSE]
+    val[,n] = apply(tmp, 1L, grp_assoc)
+  }
+  val
+}

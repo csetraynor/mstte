@@ -1,7 +1,7 @@
 library(simms)
 
 set.seed(9911)
-sim1 = simms::sim_idm_jm(n = 2000)
+sim1 = simms::sim_idm_jm(n = 200)
 
 tmat_mst <- mstate::trans.illdeath(names=c("diagnosis","relapse","death"))
 sim1$Mstate = mstate::msprep(time=c(NA,"df_time","os_time"),
@@ -20,6 +20,11 @@ formulaMs = lapply(1:3, function (x)
 basehaz = lapply(1:3, function(x)
   "weibull")
 
+priorLong = rstanarm::normal()
+priorLong_intercept = rstanarm::normal()
+priorLong_aux = rstanarm::cauchy(0, 5)
+prior_covariance = rstanarm::lkj()
+
 priorMs_intercept = lapply(1:3, function(x)
   rstanarm::normal() )
 
@@ -32,9 +37,54 @@ priorMs = lapply(1:3, function(x)
 priorMs_assoc = lapply(1:3, function(x)
   rstanarm::normal() )
 
+priorEvent_assoc = lapply(1:3, function(x)
+  rstanarm::normal() )
+
 dataLong = sim1$Long1
 dataMs = sim1$Mstate
 
 time_var = "tij"
 time_start = "Tstart"
 id_var = "id"
+
+family = gaussian
+assoc = "etavalue"
+lag_assoc = 0
+epsilon = 1E-5
+prior_PD = FALSE
+qnodes = 15
+init = "prefit"
+
+
+
+init_fit = msjm_stan(formulaLong = formulaLong,
+                  dataLong = dataLong,
+                  formulaMs = formulaMs,
+                  dataMs = dataMs,
+                  time_var = "tij",
+                  time_start = "Tstart",
+                  id_var = "id",
+
+                  family = gaussian,
+                  assoc = "etavalue",
+                  lag_assoc = 0,
+                  epsilon = 1E-5,
+                  prior_PD = FALSE,
+                  priorLong = rstanarm::normal(),
+                  priorLong_intercept = rstanarm::normal(),
+                  priorLong_aux = rstanarm::cauchy(0, 5),
+                  prior_covariance = rstanarm::lkj(),
+
+                  priorMs_intercept = lapply(1:3, function(x)
+                    rstanarm::normal() ),
+
+                  priorMs_aux = lapply(1:3, function(x)
+                    rstanarm::normal() ),
+
+                  priorMs = lapply(1:3, function(x)
+                    rstanarm::normal() ),
+
+                  priorMs_assoc = lapply(1:3, function(x)
+                    rstanarm::normal() ),
+                  basehaz = lapply(1:3, function(x)
+                    "weibull"))
