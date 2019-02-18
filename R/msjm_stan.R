@@ -501,7 +501,7 @@ msjm_stan <- function(formulaLong,
                       formulaMs,
                       dataMs,
                       time_var,
-                      time_start = "Tstart",
+                      time_start,
                       n_trans,
                       id_var,
                       family = gaussian,
@@ -511,7 +511,9 @@ msjm_stan <- function(formulaLong,
                       epsilon = 1E-5,
                       basehaz = c("bs", "weibull", "piecewise"),
                       basehaz_ops,
-                      qnodes = 15, init = "prefit", weights,
+                      qnodes = 15,
+                      init = "prefit",
+                      weights,
                       priorLong = rstanarm::normal(),
                       priorLong_intercept = rstanarm::normal(),
                       priorLong_aux = rstanarm::cauchy(0, 5),
@@ -546,7 +548,7 @@ msjm_stan <- function(formulaLong,
   if (missing(id_var))      id_var      <- NULL
   if (missing(time_var))    time_var    <- NULL
   if (missing(time_start))  time_start <- NULL
-  if (missing(grp_assoc))   grp_assoc   <- NULL
+  if (missing(grp_assoc))
 
   if (!is.null(weights))
     stop("'weights' are not yet implemented.")
@@ -995,7 +997,7 @@ msjm_stan <- function(formulaLong,
   # Multistate submodel(s)
   #----------------
 
-  if (is_msjm) { # begin jm block
+  if (is_msjm) { # begin msjm block
 
     # fit separate event submodel
     # ms_mod <-  handle_ms_mod(formula = formulaMs,
@@ -1020,7 +1022,7 @@ msjm_stan <- function(formulaLong,
       assoc_obs[[m]] <- lapply(seq_len(n_trans), function(j)
         assoc_time( x = dataLong[[m]],
                     t_var = time_var,
-                    t = ms_mod[[j]]$eventtime + meta$time_start[[j]] ,
+                    t = ms_mod[[j]]$t_end + meta$time_start[[j]] ,
                     id_state = meta$id_state[[j]] ) )
     }
 
@@ -1030,7 +1032,7 @@ msjm_stan <- function(formulaLong,
       if(is.data.frame(dataLong)){
         validate_observation_times(
           data = dataLong[assoc_obs[[m]][[j]], ],
-          eventtimes = ms_mod[[j]]$eventtime + meta$time_start[[j]],
+          exittime = ms_mod[[j]]$t_end + meta$time_start[[j]],
           id_var     = id_var,
           time_var   = time_var
         )
@@ -1038,7 +1040,7 @@ msjm_stan <- function(formulaLong,
         lapply(seq_len(M), function(m){
           validate_observation_times(
             data = dataLong[[m]][assoc_obs[[m]][[j]], ],
-            eventtimes = ms_mod[[j]]$eventtime + meta$time_start[[j]],
+            exittime = ms_mod[[j]]$t_end + meta$time_start[[j]],
             id_var     = id_var,
             time_var   = time_var
           )
@@ -1064,7 +1066,7 @@ msjm_stan <- function(formulaLong,
     }
     )
 
-    ms_user_prior_intercept_stuff <- prior_intercept_stuff <-
+    ms_user_prior_intercept_stuff <- ms_prior_intercept_stuff <-
       lapply(priorMs_intercept,
         FUN = handle_glm_prior,
         nvars = 1,
@@ -1072,7 +1074,7 @@ msjm_stan <- function(formulaLong,
         link = NULL,
         ok_dists = ok_dists_int)
 
-    ms_user_prior_aux_stuff <- prior_aux_stuff <-
+    ms_user_prior_aux_stuff <- ms_prior_aux_stuff <-
       lapply(seq_len(n_trans), function(j) handle_glm_prior(
         priorMs_aux[[j]],
         nvars = ms_mod[[j]]$basehaz$nvars,
@@ -1092,13 +1094,260 @@ msjm_stan <- function(formulaLong,
     }
 
     # autoscaling of priors
-    e_prior_stuff           <- autoscale_prior(e_prior_stuff, predictors = e_mod$x)
-    e_prior_intercept_stuff <- autoscale_prior(e_prior_intercept_stuff)
-    e_prior_aux_stuff       <- autoscale_prior(e_prior_aux_stuff)
+    ms_prior_stuff           <- lapply(seq_len(n_trans), function(k)
+      autoscale_prior(ms_prior_stuff[[k]], predictors = ms_mod[[k]]$x) )
+
+    ms_prior_intercept_stuff <- lapply(seq_len(n_trans), function(k)
+      autoscale_prior(ms_prior_intercept_stuff[[k]]))
+
+    ms_prior_aux_stuff       <- lapply(seq_len(n_trans), function(k)
+      autoscale_prior(ms_prior_aux_stuff[[k]]) )
+
+    #----------- Data for export to Stan -----------#
+    # Temporary model with only three states, aka idm
+    # Transition 01
+    # dimensions
+    standata$e_K01              <- ai(ms_mod[[1]]$K)
+    standata$nevents01          <- ai(ms_mod[[1]]$nevents)
+    #standata$Npat             <- ai(ms_mod[[1]]$Npat)
+    #standata$Nevents          <- ai(ms_mod[[1]]$Nevents)
+    standata$qnodes01           <- ai(ms_mod[[1]]$qnodes)
+    standata$len_cpts01         <- ai(ms_mod[[1]]$len_cpts)
+    standata$len_epts01         <- ai(ms_mod[[1]]$len_epts)
+    standata$len_qpts01         <- ai(ms_mod[[1]]$len_qpts)
+    standata$len_ipts01         <- ai(ms_mod[[1]]$len_ipts)
+    standata$idx_cpts01         <- am(ms_mod[[1]]$idx_cpts)
+    standata$e_has_intercept01  <- ai(ms_mod[[1]]$has_intercept)
+
+    # design matrices
+    standata$cpts01             <- aa(ms_mod[[1]]$cpts)
+    standata$epts01             <- aa(ms_mod[[1]]$epts)
+    standata$qpts01             <- aa(ms_mod[[1]]$qpts)
+    standata$ipts01             <- aa(ms_mod[[1]]$ipts)
+    standata$qwts01             <- aa(ms_mod[[1]]$qwts)
+    standata$iwts01             <- aa(ms_mod[[1]]$iwts)
+    standata$eids01             <- aa(ms_mod[[1]]$eids)
+    standata$qids01             <- aa(ms_mod[[1]]$qids)
+    standata$iids01             <- aa(ms_mod[[1]]$iids)
+    standata$e_x01              <- ms_mod[[1]]$x_cpts
+    standata$e_xbar01           <- aa(ms_mod[[1]]$x_bar)
+
+    # baseline hazard
+    standata$basehaz_type01     <- ai(ms_mod[[1]]$basehaz$type)
+    standata$basehaz_nvars01    <- ai(ms_mod[[1]]$basehaz$nvars)
+    standata$basis_epts01       <- ms_mod[[1]]$basis_epts
+    standata$basis_qpts01       <- ms_mod[[1]]$basis_qpts
+    standata$basis_ipts01       <- ms_mod[[1]]$basis_ipts
+    standata$norm_const01       <- ms_mod[[1]]$norm_const
+
+    # priors
+    standata$e_prior_dist01              <- ms_prior_stuff[[1]]$prior_dist
+    standata$e_prior_dist_for_intercept01 <- ms_prior_intercept_stuff[[1]]$prior_dist
+    standata$e_prior_dist_for_aux01      <- ms_prior_aux_stuff[[1]]$prior_dist
+
+    # hyperparameters for event submodel priors
+    standata$e_prior_mean01               <- ms_prior_stuff[[1]]$prior_mean
+    standata$e_prior_scale01              <- ms_prior_stuff[[1]]$prior_scale
+    standata$e_prior_df01                 <- ms_prior_stuff[[1]]$prior_df
+    standata$e_prior_mean_for_intercept01 <- c(ms_prior_intercept_stuff[[1]]$prior_mean)
+    standata$e_prior_scale_for_intercept01 <- c(ms_prior_intercept_stuff[[1]]$prior_scale)
+    standata$e_prior_df_for_intercept01   <- c(ms_prior_intercept_stuff[[1]]$prior_df)
+    standata$e_prior_mean_for_aux01       <- ms_prior_aux_stuff[[1]]$prior_mean
+    standata$e_prior_scale_for_aux01      <- ms_prior_aux_stuff[[1]]$prior_scale
+    standata$e_prior_df_for_aux01         <- ms_prior_aux_stuff[[1]]$prior_df
+    standata$e_global_prior_scale01       <- ms_prior_stuff[[1]]$global_prior_scale
+    standata$e_global_prior_df01          <- ms_prior_stuff[[1]]$global_prior_df
+    standata$e_slab_df01                  <- ms_prior_stuff[[1]]$slab_df
+    standata$e_slab_scale01               <- ms_prior_stuff[[1]]$slab_scale
+    # Transition 02
+    # dimensions
+    standata$e_K02              <- ai(ms_mod[[2]]$K)
+    standata$nevents02          <- ai(ms_mod[[2]]$nevents)
+    #standata$Npat             <- ai(ms_mod[[2]]$Npat)
+    #standata$Nevents          <- ai(ms_mod[[2]]$Nevents)
+    standata$qnodes02           <- ai(ms_mod[[2]]$qnodes)
+    standata$len_cpts02         <- ai(ms_mod[[2]]$len_cpts)
+    standata$len_epts02         <- ai(ms_mod[[2]]$len_epts)
+    standata$len_qpts02         <- ai(ms_mod[[2]]$len_qpts)
+    standata$len_ipts02         <- ai(ms_mod[[2]]$len_ipts)
+    standata$idx_cpts02         <- am(ms_mod[[2]]$idx_cpts)
+    standata$e_has_intercept02  <- ai(ms_mod[[2]]$has_intercept)
+
+    # design matrices
+    standata$cpts02             <- aa(ms_mod[[2]]$cpts)
+    standata$epts02             <- aa(ms_mod[[2]]$epts)
+    standata$qpts02             <- aa(ms_mod[[2]]$qpts)
+    standata$ipts02             <- aa(ms_mod[[2]]$ipts)
+    standata$qwts02             <- aa(ms_mod[[2]]$qwts)
+    standata$iwts02             <- aa(ms_mod[[2]]$iwts)
+    standata$eids02             <- aa(ms_mod[[2]]$eids)
+    standata$qids02             <- aa(ms_mod[[2]]$qids)
+    standata$iids02             <- aa(ms_mod[[2]]$iids)
+    standata$e_x02              <- ms_mod[[2]]$x_cpts
+    standata$e_xbar02           <- aa(ms_mod[[2]]$x_bar)
+
+    # baseline hazard
+    standata$basehaz_type02     <- ai(ms_mod[[2]]$basehaz$type)
+    standata$basehaz_nvars02    <- ai(ms_mod[[2]]$basehaz$nvars)
+    standata$basis_epts02       <- ms_mod[[2]]$basis_epts
+    standata$basis_qpts02       <- ms_mod[[2]]$basis_qpts
+    standata$basis_ipts02       <- ms_mod[[2]]$basis_ipts
+    standata$norm_const02       <- ms_mod[[2]]$norm_const
+
+    # priors
+    standata$e_prior_dist02              <- ms_prior_stuff[[2]]$prior_dist
+    standata$e_prior_dist_for_intercept02 <- ms_prior_intercept_stuff[[2]]$prior_dist
+    standata$e_prior_dist_for_aux02      <- ms_prior_aux_stuff[[2]]$prior_dist
+
+    # hyperparameters for event submodel priors
+    standata$e_prior_mean02               <- ms_prior_stuff[[2]]$prior_mean
+    standata$e_prior_scale02              <- ms_prior_stuff[[2]]$prior_scale
+    standata$e_prior_df02                 <- ms_prior_stuff[[2]]$prior_df
+    standata$e_prior_mean_for_intercept02 <- c(ms_prior_intercept_stuff[[2]]$prior_mean)
+    standata$e_prior_scale_for_intercept02 <- c(ms_prior_intercept_stuff[[2]]$prior_scale)
+    standata$e_prior_df_for_intercept02   <- c(ms_prior_intercept_stuff[[2]]$prior_df)
+    standata$e_prior_mean_for_aux02       <- ms_prior_aux_stuff[[2]]$prior_mean
+    standata$e_prior_scale_for_aux02      <- ms_prior_aux_stuff[[2]]$prior_scale
+    standata$e_prior_df_for_aux02         <- ms_prior_aux_stuff[[2]]$prior_df
+    standata$e_global_prior_scale02       <- ms_prior_stuff[[2]]$global_prior_scale
+    standata$e_global_prior_df02          <- ms_prior_stuff[[2]]$global_prior_df
+    standata$e_slab_df02                  <- ms_prior_stuff[[2]]$slab_df
+    standata$e_slab_scale02               <- ms_prior_stuff[[2]]$slab_scale
+    # Transition 12
+    # dimensions
+    standata$e_K12              <- ai(ms_mod[[3]]$K)
+    standata$nevents12          <- ai(ms_mod[[3]]$nevents)
+    #standata$Npat             <- ai(ms_mod[[3]]$Npat)
+    #standata$Nevents          <- ai(ms_mod[[3]]$Nevents)
+    standata$qnodes12           <- ai(ms_mod[[3]]$qnodes)
+    standata$len_cpts12         <- ai(ms_mod[[3]]$len_cpts)
+    standata$len_epts12         <- ai(ms_mod[[3]]$len_epts)
+    standata$len_qpts12         <- ai(ms_mod[[3]]$len_qpts)
+    standata$len_ipts12         <- ai(ms_mod[[3]]$len_ipts)
+    standata$idx_cpts12         <- am(ms_mod[[3]]$idx_cpts)
+    standata$e_has_intercept12  <- ai(ms_mod[[3]]$has_intercept)
+
+    # design matrices
+    standata$cpts12             <- aa(ms_mod[[3]]$cpts)
+    standata$epts12             <- aa(ms_mod[[3]]$epts)
+    standata$qpts12             <- aa(ms_mod[[3]]$qpts)
+    standata$ipts12             <- aa(ms_mod[[3]]$ipts)
+    standata$qwts12             <- aa(ms_mod[[3]]$qwts)
+    standata$iwts12             <- aa(ms_mod[[3]]$iwts)
+    standata$eids12             <- aa(ms_mod[[3]]$eids)
+    standata$qids12             <- aa(ms_mod[[3]]$qids)
+    standata$iids12             <- aa(ms_mod[[3]]$iids)
+    standata$e_x12              <- ms_mod[[3]]$x_cpts
+    standata$e_xbar12           <- aa(ms_mod[[3]]$x_bar)
+
+    # baseline hazard
+    standata$basehaz_type12     <- ai(ms_mod[[3]]$basehaz$type)
+    standata$basehaz_nvars12    <- ai(ms_mod[[3]]$basehaz$nvars)
+    standata$basis_epts12       <- ms_mod[[3]]$basis_epts
+    standata$basis_qpts12       <- ms_mod[[3]]$basis_qpts
+    standata$basis_ipts12       <- ms_mod[[3]]$basis_ipts
+    standata$norm_const12       <- ms_mod[[3]]$norm_const
+
+    # priors
+    standata$e_prior_dist12              <- ms_prior_stuff[[3]]$prior_dist
+    standata$e_prior_dist_for_intercept12 <- ms_prior_intercept_stuff[[3]]$prior_dist
+    standata$e_prior_dist_for_aux12      <- ms_prior_aux_stuff[[3]]$prior_dist
+
+    # hyperparameters for event submodel priors
+    standata$e_prior_mean12               <- ms_prior_stuff[[3]]$prior_mean
+    standata$e_prior_scale12              <- ms_prior_stuff[[3]]$prior_scale
+    standata$e_prior_df12                 <- ms_prior_stuff[[3]]$prior_df
+    standata$e_prior_mean_for_intercept12 <- c(ms_prior_intercept_stuff[[3]]$prior_mean)
+    standata$e_prior_scale_for_intercept12 <- c(ms_prior_intercept_stuff[[3]]$prior_scale)
+    standata$e_prior_df_for_intercept12   <- c(ms_prior_intercept_stuff[[3]]$prior_df)
+    standata$e_prior_mean_for_aux12       <- ms_prior_aux_stuff[[3]]$prior_mean
+    standata$e_prior_scale_for_aux12      <- ms_prior_aux_stuff[[3]]$prior_scale
+    standata$e_prior_df_for_aux12         <- ms_prior_aux_stuff[[3]]$prior_df
+    standata$e_global_prior_scale12       <- ms_prior_stuff[[3]]$global_prior_scale
+    standata$e_global_prior_df12          <- ms_prior_stuff[[3]]$global_prior_df
+    standata$e_slab_df12                  <- ms_prior_stuff[[3]]$slab_df
+    standata$e_slab_scale12               <- ms_prior_stuff[[3]]$slab_scale
+
+    #-----------------------
+    # Association structure
+    #-----------------------
+
+    # define the valid types of association structure
+    # !! if order is changed here, then must also change standata$has_assoc !!
+    ok_assoc <- c("null",
+                  "etavalue",
+                  "etaslope",
+                  "etaauc",
+                  "muvalue",
+                  "muslope",
+                  "muauc",
+                  "shared_b",
+                  "shared_coef")
+
+    meta$ok_assoc       <- ok_assoc
+    meta$ok_assoc_data  <- ok_assoc[c(2,3,5,6)] # ok to interact with covariates
+    meta$ok_assoc_int   <- ok_assoc[c(2,5)]     # ok to interact across biomarkers
+    meta$ok_assoc_icens <- ok_assoc[c(1:3,5,6)] # ok to use with interval censoring
+
+    # check lag time is valid
+    lag_assoc <- validate_lag_assoc(lag_assoc, M)
+
+    # return an array summarising the association structure
+    assoc <- mapply(handle_assoc,
+                    user_assoc = assoc,
+                    user_lag   = lag_assoc,
+                    y_mod      = y_mod,
+                    MoreArgs   = nlist(meta))
+    assoc <- check_order_of_assoc_interactions(assoc, meta$ok_assoc_int)
+    assoc <- set_colnames(assoc, stubs)
+
+    # for each submodel, identify grouping factors clustered within 'id_var'
+
+    # (i.e. lower level clustering)
+    ok_assoc_grp <- c("sum",                      # valid inputs to 'grp_assoc' arg
+                      "mean",
+                      "min",
+                      "max")
+
+    ok_assoc_with_grp <- c("etavalue",            # ok to use with non-NULL grp_assoc
+                           "etavalue_data",
+                           "etaslope",
+                           "etaslope_data",
+                           "muvalue",
+                           "muvalue_data")
+
+    grp_basic <- xapply(FUN    = get_basic_grp_info,
+                        y_mod  = y_mod,
+                        id_var = id_var)
+    grp_stuff <- xapply(FUN    = get_extra_grp_info,
+                        basic_info = grp_basic,
+                        flist  = fetch(y_mod, "z", "group_list"),
+                        args   = nlist(id_var, grp_assoc, ok_assoc_grp))
+    has_grp <- fetch_(grp_stuff, "has_grp")
+    if (not.null(grp_assoc) && !any(has_grp))
+      stop2("'grp_assoc' can only be specified when there is a grouping ",
+            "factor clustered within patients.")
+    if (any(has_grp))
+      validate_assoc_with_grp(grp_stuff, assoc, ok_assoc_with_grp)
+
+    # design matrices for longitudinal submodel at the quadrature points
+    auc_qnodes <- meta$auc_qnodes <- 15L
+    a_mod <- list()
+    for(j in seq_len(n_trans)){
+      a_mod[[j]] <- xapply(FUN       = handle_assocmod,
+                      data      = dataLong,
+                      assoc     = apply(assoc, 2L, c), # converts array to list
+                      y_mod     = y_mod,
+                      grp_stuff = grp_stuff,
+                      args      = nlist(ms_mod[[j]], meta))
+    }
+
 
 
 
   }
+
+
 
   #-----------
   # Fit model

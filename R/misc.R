@@ -281,6 +281,12 @@ comma <- function(x) {
 
 
 # -------------- Sanity checks ---------#
+# Return error msg if both elements of the object are TRUE
+STOP_combination_not_allowed <- function(object, x, y) {
+  if (object[[x]] && object[[y]])
+    stop("In ", deparse(substitute(object)), ", '", x, "' and '", y,
+         "' cannot be specified together", call. = FALSE)
+}
 # Error message when a required variable is missing from the data frame
 #
 # @param var The name of the variable that could not be found
