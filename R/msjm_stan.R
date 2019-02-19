@@ -1340,14 +1340,30 @@ msjm_stan <- function(formulaLong,
     a_mod <- list()
 
     for(j in (seq_len(n_trans))){
-      a_mod[[j]] <- xapply(FUN  = handle_assocmod2,
-                      data      = dataLong,
-                      assoc     = apply(assoc, 2L, c), # converts array to list
-                      y_mod     = y_mod,
-                      grp_stuff = grp_stuff,
-                      args      = nlist(e_mod = ms_mod[[j]],
-                                        meta,
-                                        j))
+      if(is.data.frame(dataLong)){
+        a_mod[[j]] <- lapply(seq_len(M), function(m){
+        handle_assocmod2(
+          data = dataLong[assoc_obs[[m]][[j]], ],
+          assoc     = apply(assoc, 2L, c)[[m]], # converts array to list
+          y_mod     = y_mod[[m]],
+          grp_stuff = grp_stuff[[m]],
+          e_mod = ms_mod[[j]],
+          meta = meta,
+          j = j)
+        })
+      } else {
+        a_mod[[j]] <- lapply(seq_len(M), function(m){
+          handle_assocmod2(
+            data = dataLong[[m]][assoc_obs[[m]][[j]], ],
+            assoc     = apply(assoc, 2L, c)[[m]], # converts array to list
+            y_mod     = y_mod[[m]],
+            grp_stuff = grp_stuff[[m]],
+            e_mod = ms_mod[[j]],
+            meta = meta,
+            j = j
+          )
+        })
+      }
     }
 
     # number of association parameters
@@ -1375,27 +1391,41 @@ msjm_stan <- function(formulaLong,
                       y_nms_ppd,
                       "log-posterior")
 
+
+
+    assoc_ids <- lapply(seq_len(n_trans), function(j)
+      mapply( FUN = assoc_id,
+                longdata = dataLong,
+             MoreArgs = nlist(
+               msdata = dataMs[[j]],
+              id_var)) )
+
     init_fit  <- replace_stanfit_nms(init_fit, init_nms_all)
     init_mat  <- t(colMeans(am(init_fit))) # posterior means
     init_nms  <- collect_nms(colnames(init_mat), M, stub = "Long")
     init_beta <- lapply(1:M, function(m) init_mat[, init_nms$y[[m]]])
-    init_b    <- lapply(1:M, function(m) {
-      # can drop _NEW_ groups since they are not required for generating
-      # the assoc_terms that are used in scaling the priors for
-      # the association parameters (ie. the Zt matrix returned by the
-      # function 'make_assoc_parts_for_stan' will not be padded).
-      b <- init_mat[, init_nms$y_b[[m]]]
-      b[!grepl("_NEW_", names(b), fixed = TRUE)]
+    init_b    <- lapply(seq_len(n_trans), function(j){
+      lapply(1:M, function(m) {
+        # can drop _NEW_ groups since they are not required for generating
+        # the assoc_terms that are used in scaling the priors for
+        # the association parameters (ie. the Zt matrix returned by the
+        # function 'make_assoc_parts_for_stan' will not be padded).
+        b <- init_mat[, init_nms$y_b[[m]]]
+        b <- b[!grepl("_NEW_", names(b), fixed = TRUE)]
+        b[assoc_ids[[j]]]
+      })
     })
 
 
     if (is.character(init) && (init =="prefit"))
-      init <- lapply(seq_len(n_trans), function(j)
-        get_prefit_inits2(init_fit = init_fit,
-                          e_mod = ms_mod[[j]],
-                          prior_stuff = ms_prior_stuff[[j]],
-                          prior_aux_stuff = ms_prior_aux_stuff[[j]],
-                          standata = standata) )
+      init <- mapply(FUN = get_prefit_inits2,
+                     e_mod = ms_mod,
+                     assoc_ids = assoc_ids,
+                     prior_stuff = ms_prior_stuff,
+                     prior_aux_stuff = ms_prior_aux_stuff,
+                     MoreArgs = nlist(standata = standata,
+                                      init_fit))
+
     #----------- Prior distributions -----------#
 
     # Priors for association parameters
@@ -1405,65 +1435,205 @@ msjm_stan <- function(formulaLong,
               nvars = a_K,
               MoreArgs = nlist(default_scale = 2.5,
                                link          = NULL,
-                               ok_dists      = ok_dists)
+                               ok_dists      = ok_dists),
+              SIMPLIFY = FALSE
                        )
 
     # Autoscaling of priors
-    for(i in seq_len(n_trans)){
-      if (a_K[[i]]) {
-        e_prior_assoc_stuff <- autoscale_prior(e_prior_assoc_stuff[,i],
-                                               family = family,
-                                               assoc  = assoc,
-                                               parts  = a_mod,
-                                               beta   = init_beta,
-                                               b      = init_b)
-      }
-    }
+    e_prior_assoc_stuff <- mapply(
+      FUN = autoscale_prior2,
+      a_k = a_K,
+      prior_stuff = e_prior_assoc_stuff,
+      parts  = a_mod,
+      b      = init_b,
+      MoreArgs = nlist(
+        family,
+        assoc,
+        beta   = init_beta
+      )
+    )
 
+    #----------- Data for export to Stan -----------#
 
+    # dimensions
+    standata$assoc01 <- ai(a_K[[1]] > 0L) # any association structure
+    standata$a_K01   <- ai(a_K[[1]])      # num association parameters
 
+    standata$assoc02 <- ai(a_K[[2]] > 0L) # any association structure
+    standata$a_K02   <- ai(a_K[[2]])      # num association parameters
 
+    standata$assoc12 <- ai(a_K[[3]] > 0L) # any association structure
+    standata$a_K12   <- ai(a_K[[3]])      # num association parameters
+
+    # indicators for components required to build association terms
+    standata$assoc_uses01 <- make_assoc_component_flags(assoc)
+    standata$assoc_uses02 <- make_assoc_component_flags(assoc)
+    standata$assoc_uses12 <- make_assoc_component_flags(assoc)
+
+    # indicators for each possible type of association structure
+    # !! must be careful with corresponding use of indexing in stan code !!
+    # !! this is determined by the row ordering of the 'assoc' array     !!
+    #   1  = ev
+    #   2  = es
+    #   3  = ea
+    #   4  = mv
+    #   5  = ms
+    #   6  = ma
+    #   7  = shared_b
+    #   8  = shared_coef
+    #   9  = ev_data
+    #   10 = es_data
+    #   11 = mv_data
+    #   12 = ms_data
+    #   13 = evev
+    #   14 = evmv
+    #   15 = mvev
+    #   16 = mvmv
+    standata$has_assoc01 <- make_assoc_type_flags(assoc)
+    standata$has_assoc02 <- make_assoc_type_flags(assoc)
+    standata$has_assoc12 <- make_assoc_type_flags(assoc)
+
+    # data for calculating eta, slope, auc in GK quadrature
+    standata <- standata_add_assoc_grp01   (standata, a_mod = a_mod[[1]], grp_stuff)
+    standata <- standata_add_assoc_grp02   (standata, a_mod = a_mod[[2]], grp_stuff)
+    standata <- standata_add_assoc_grp12   (standata, a_mod = a_mod[[3]], grp_stuff)
+
+    standata <- standata_add_assoc_xz01    (standata, a_mod = a_mod[[1]], meta = meta, assoc = assoc)
+    standata <- standata_add_assoc_xz02    (standata, a_mod = a_mod[[2]], meta = meta, assoc = assoc)
+    standata <- standata_add_assoc_xz12    (standata, a_mod = a_mod[[3]], meta = meta, assoc = assoc)
+
+    standata <- standata_add_assoc_auc01   (standata, a_mod = a_mod[[1]], meta = meta, j = 1)
+    standata <- standata_add_assoc_auc02   (standata, a_mod = a_mod[[2]], meta = meta, j = 2)
+    standata <- standata_add_assoc_auc12   (standata, a_mod = a_mod[[3]], meta = meta, j = 3)
+
+    standata <- standata_add_assoc_extras01(standata, a_mod = a_mod[[1]], assoc = assoc)
+    standata <- standata_add_assoc_extras02(standata, a_mod = a_mod[[2]], assoc = assoc)
+    standata <- standata_add_assoc_extras12(standata, a_mod = a_mod[[3]], assoc = assoc)
+
+    # hyperparameters for assoc parameter priors
+    standata$a_prior_dist01         <- e_prior_assoc_stuff[,1]$prior_dist
+    standata$a_prior_mean01          <- e_prior_assoc_stuff[,1]$prior_mean
+    standata$a_prior_scale01         <- aa(e_prior_assoc_stuff[,1]$prior_scale)
+    standata$a_prior_df01            <- e_prior_assoc_stuff[,1]$prior_df
+    standata$a_global_prior_scale01  <- e_prior_assoc_stuff[,1]$global_prior_scale
+    standata$a_global_prior_df01     <- e_prior_assoc_stuff[,1]$global_prior_df
+    standata$a_slab_df01             <- e_prior_assoc_stuff[,1]$slab_df
+    standata$a_slab_scale01          <- e_prior_assoc_stuff[,1]$slab_scale
+
+    # centering for association terms
+    standata$a_xbar01  <- if (a_K[[1]]) e_prior_assoc_stuff[,1]$a_xbar else numeric(0)
+
+    # second
+    standata$a_prior_dist02         <- e_prior_assoc_stuff[,2]$prior_dist
+    standata$a_prior_mean02          <- e_prior_assoc_stuff[,2]$prior_mean
+    standata$a_prior_scale02         <- aa(e_prior_assoc_stuff[,2]$prior_scale)
+    standata$a_prior_df02            <- e_prior_assoc_stuff[,2]$prior_df
+    standata$a_global_prior_scale02  <- e_prior_assoc_stuff[,2]$global_prior_scale
+    standata$a_global_prior_df02     <- e_prior_assoc_stuff[,2]$global_prior_df
+    standata$a_slab_df02             <- e_prior_assoc_stuff[,2]$slab_df
+    standata$a_slab_scale02          <- e_prior_assoc_stuff[,2]$slab_scale
+
+    # centering for association terms
+    standata$a_xbar02  <- if (a_K[[2]]) e_prior_assoc_stuff[,2]$a_xbar else numeric(0)
+
+    # third
+    standata$a_prior_dist12         <- e_prior_assoc_stuff[,3]$prior_dist
+    standata$a_prior_mean12          <- e_prior_assoc_stuff[,3]$prior_mean
+    standata$a_prior_scale12         <- aa(e_prior_assoc_stuff[,3]$prior_scale)
+    standata$a_prior_df12            <- e_prior_assoc_stuff[,3]$prior_df
+    standata$a_global_prior_scale12  <- e_prior_assoc_stuff[,3]$global_prior_scale
+    standata$a_global_prior_df12     <- e_prior_assoc_stuff[,3]$global_prior_df
+    standata$a_slab_df12             <- e_prior_assoc_stuff[,3]$slab_df
+    standata$a_slab_scale12          <- e_prior_assoc_stuff[,3]$slab_scale
+
+    # centering for association terms
+    standata$a_xbar12  <- if (a_K[[3]]) e_prior_assoc_stuff[,3]$a_xbar else numeric(0)
+
+  } # end jm block
+
+  #---------------
+  # Prior summary
+  #---------------
+
+  if (is_jm) {
+    prior_info <- summarize_jm_prior(
+      user_priorLong                      = y_user_prior_stuff,
+      user_priorLong_intercept            = y_user_prior_intercept_stuff,
+      user_priorLong_aux                  = y_user_prior_aux_stuff,
+      user_prior_covariance               = prior_covariance,
+      y_has_intercept                     = fetch_(y_mod, "x", "has_intercept"),
+      y_has_predictors                    = fetch_(y_mod, "x", "K") > 0,
+      adjusted_priorLong_scale            = fetch(y_prior_stuff, "prior_scale"),
+      adjusted_priorLong_intercept_scale  = fetch(y_prior_intercept_stuff, "prior_scale"),
+      adjusted_priorLong_aux_scale        = fetch(y_prior_aux_stuff, "prior_scale"),
+      family                              = family,
+      basehaz                             = e_mod$basehaz,
+      user_priorEvent                     = e_user_prior_stuff,
+      user_priorEvent_intercept           = e_user_prior_intercept_stuff,
+      user_priorEvent_aux                 = e_user_prior_aux_stuff,
+      user_priorEvent_assoc               = e_user_prior_assoc_stuff,
+      e_has_intercept                     = standata$e_has_intercept,
+      e_has_predictors                    = standata$e_K > 0,
+      has_assoc                           = standata$a_K > 0,
+      adjusted_priorEvent_scale           = e_prior_stuff$prior_scale,
+      adjusted_priorEvent_intercept_scale = e_prior_intercept_stuff$prior_scale,
+      adjusted_priorEvent_aux_scale       = e_prior_aux_stuff$prior_scale,
+      adjusted_priorEvent_assoc_scale     = e_prior_assoc_stuff$prior_scale)
+  } else {
+    prior_info <- summarize_jm_prior(
+      user_priorLong                      = y_user_prior_stuff,
+      user_priorLong_intercept            = y_user_prior_intercept_stuff,
+      user_priorLong_aux                  = y_user_prior_aux_stuff,
+      user_prior_covariance               = prior_covariance,
+      y_has_intercept                     = fetch_(y_mod, "x", "has_intercept"),
+      y_has_predictors                    = fetch_(y_mod, "x", "K") > 0,
+      adjusted_priorLong_scale            = fetch(y_prior_stuff, "prior_scale"),
+      adjusted_priorLong_intercept_scale  = fetch(y_prior_intercept_stuff, "prior_scale"),
+      adjusted_priorLong_aux_scale        = fetch(y_prior_aux_stuff, "prior_scale"),
+      family                              = family)
   }
-
-
 
   #-----------
   # Fit model
   #-----------
 
-  fit <- stan_msjm.fit(
-    formulaLong          = formulaLong,
-    formulaMs            = formulaMs,
-    dataLong             = dataLong,
-    dataMs               = dataMs,
-    n_trans              = n_trans,
-    time_var             = time_var,
-    id_var               = id_var,
-    family               = family,
-    assoc                = assoc,
-    lag_assoc            = lag_assoc,
-    grp_assoc            = grp_assoc,
-    epsilon              = epsilon,
-    basehaz              = basehaz,
-    basehaz_ops          = basehaz_ops,
-    qnodes               = qnodes,
-    init                 = init,
-    weights              = weights,
-    priorLong            = priorLong,
-    priorLong_intercept  = priorLong_intercept,
-    priorLong_aux        = priorLong_aux,
-    priorEvent           = priorEvent,
-    priorEvent_intercept = priorEvent_intercept,
-    priorEvent_aux       = priorEvent_aux,
-    priorEvent_assoc     = priorEvent_assoc,
-    prior_covariance     = prior_covariance,
-    prior_PD             = prior_PD,
-    algorithm            = algorithm,
-    adapt_delta          = adapt_delta,
-    max_treedepth        = max_treedepth,
-    QR                   = QR,
-    sparse               = sparse,
-    ...)
+  # obtain stan model code
+  stanfit  <- if (is_jm) stanmodels$jm else stanmodels$mvmer
+
+  # specify parameters for stan to monitor
+  stanpars <- pars_to_monitor(standata, is_jm = is_jm)
+
+  # report type of model to user
+  txt1 <- if (M == 1) "uni"   else "multi"
+  txt2 <- if (is_jm)  "joint" else "glmer"
+  txt3 <- paste0("Fitting a ", txt1, "variate ", txt2, " model.\n\n")
+  txt4 <- "Please note the warmup may be much slower than later iterations!\n"
+
+  # fit model using stan
+  cat(txt3)
+  if (algorithm == "sampling") { # mcmc
+    cat(txt4)
+    args <- set_jm_sampling_args(
+      object = stanfit,
+      data   = standata,
+      pars   = stanpars,
+      init   = init,
+      cnms   = cnms,
+      user_dots = list(...),
+      user_adapt_delta   = adapt_delta,
+      user_max_treedepth = max_treedepth,
+      show_messages = FALSE)
+    stanfit <- do.call(rstan::sampling, args)
+  } else { # meanfield or fullrank vb
+    args <- nlist(
+      object = stanfit,
+      data   = standata,
+      pars   = stanpars,
+      algorithm
+    )
+    args[names(dots)] <- dots
+    stanfit <- do.call(rstan::vb, args)
+  }
 
 
 }
@@ -1474,4 +1644,7 @@ msjm_stan <- function(formulaLong,
 
 handle_timestart <- function(d, t) {
   return(d[[t]])
+}
+assoc_id <- function(msdata, longdata, id_var){
+  unique(longdata[,id_var]) %in% msdata[,id_var]
 }

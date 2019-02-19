@@ -735,6 +735,30 @@ full_join_NA <- function(x, y, ...) {
   dplyr::full_join(x = x, y = y, by = ...) %>%
     dplyr::mutate_each(dplyr::funs(replace(., which(is.na(.)), 0)))
 }
+
+# Expand/pad a matrix to the specified number of cols/rows
+#
+# @param x A matrix or 2D array
+# @param cols,rows Integer specifying the desired number
+#   of columns/rows
+# @param value The value to use for the padded cells
+# @return A matrix
+pad_matrix <- function(x, cols = NULL, rows = NULL,
+                       value = 0L) {
+  nc <- ncol(x)
+  nr <- nrow(x)
+  if (!is.null(cols) && nc < cols) {
+    pad_mat <- matrix(value, nr, cols - nc)
+    x <- cbind(x, pad_mat)
+    nc <- ncol(x) # update nc to reflect new num cols
+  }
+  if (!is.null(rows) && nr < rows) {
+    pad_mat <- matrix(value, rows - nr, nc)
+    x <- rbind(x, pad_mat)
+  }
+  x
+}
+
 # Combine pars and regex_pars
 #
 # @param x stanreg object
@@ -2124,7 +2148,9 @@ rolling_merge <- function(data, ids, times, grps = NULL) {
   # carry out the rolling merge against the specified times
   if (is.null(grps)) {
     tmp <- data.table::data.table(ids, times)
+
     val <- data[tmp, roll = TRUE, rollends = c(TRUE, TRUE)]
+
   } else {
     grps <- factor(grps)
     tmp <- data.table::data.table(ids, grps, times)

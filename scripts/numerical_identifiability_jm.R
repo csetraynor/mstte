@@ -1,4 +1,5 @@
 library(simms)
+library(rstanarm, lib.loc = "~/R-dev/")
 
 set.seed(9911)
 sim1 = simms::sim_idm_jm(n = 200)
@@ -26,7 +27,7 @@ priorLong_aux = rstanarm::cauchy(0, 5)
 prior_covariance = rstanarm::lkj()
 
 priorMs_intercept = lapply(1:3, function(x)
-  rstanarm::normal() )
+  normal() )
 
 priorMs_aux = lapply(1:3, function(x)
   rstanarm::normal() )

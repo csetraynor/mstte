@@ -6,6 +6,8 @@
 # Copyright (C) 2015, 2016, 2017 Trustees of Columbia University
 # Copyright (C) 2016, 2017 Sam Brilleman
 
+.datatable.aware <- TRUE # necessary for some reason when data.table is in Suggests
+
 #' @importFrom survival Surv
 #' @export
 survival::Surv
@@ -252,6 +254,77 @@ autoscale_prior <- function(prior_stuff, response = NULL, predictors = NULL,
   ps$prior_scale <- as.array(pmin(.Machine$double.xmax, ps$prior_scale))
   ps
 }
+
+# Autoscaling of priors
+# Same as autoscale prior but checking for a_K in each submodel.
+#
+# @param prior_stuff A named list returned by a call to handle_glm_prior
+# @param response A vector containing the response variable, only required if
+#   the priors are to be scaled by the standard deviation of the response (for
+#   gaussian reponse variables only)
+# @param predictors The predictor matrix, only required if the priors are to be
+#   scaled by the range/sd of the predictors
+# @param family A family object
+# @param QR A logical specifying whether QR decomposition is used for the
+#   predictor matrix
+# @param min_prior_scale The minimum allowed for prior scales
+# @param assoc A two dimensional array with information about desired association
+#   structure for the joint model (returned by a call to validate_assoc). Cannot
+#   be NULL if autoscaling priors for the association parameters.
+# @param ... Other arguments passed to make_assoc_terms. If autoscaling priors
+#   for the association parameters then this should include 'parts' which
+#   is a list containing the design matrices for the longitudinal submodel
+#   evaluated at the quadrature points, as well as 'beta' and 'b' which are
+#   the parameter values to use when constructing the linear predictor(s) in
+#   make_assoc_terms.
+# @return A named list with the same structure as returned by handle_glm_prior
+autoscale_prior2 <- function(prior_stuff, response = NULL, predictors = NULL, a_k,
+                            family = NULL, QR = FALSE, min_prior_scale = 1e-12,
+                            assoc = NULL, ...) {
+  if(!a_k){
+    return(prior_stuff)
+  }
+
+  ps <- prior_stuff
+
+  if (!is.null(response) && is.gaussian(family)) {
+    # use response variable for scaling priors
+    if (ps$prior_dist > 0L && ps$prior_autoscale) {
+      ss <- sd(response)
+      ps$prior_scale <- ss * ps$prior_scale
+    }
+  }
+
+  if (!is.null(predictors) && !QR) {
+    # use predictors for scaling priors
+    if (ps$prior_dist > 0L && ps$prior_autoscale) {
+      ps$prior_scale <-
+        pmax(min_prior_scale,
+             ps$prior_scale / apply(predictors, 2L, get_scale_value))
+    }
+  }
+
+  if (!is.null(assoc)) {
+    # Evaluate mean and SD of each of the association terms that will go into
+    # the linear predictor for the event submodel (as implicit "covariates").
+    # (NB the approximate association terms are calculated using coefs
+    # from the separate longitudinal submodels estimated using glmer).
+    # The mean will be used for centering each association term.
+    # The SD will be used for autoscaling the prior for each association parameter.
+    if (is.null(family))
+      stop("'family' cannot be NULL when autoscaling association parameters.")
+    assoc_terms <- make_assoc_terms(family = family, assoc = assoc, ...)
+    ps$a_xbar <- as.array(apply(assoc_terms, 2L, mean))
+    if (ps$prior_dist > 0L && ps$prior_autoscale) {
+      a_beta_scale <- apply(assoc_terms, 2L, get_scale_value)
+      ps$prior_scale <- pmax(min_prior_scale, ps$prior_scale / a_beta_scale)
+    }
+  }
+
+  ps$prior_scale <- as.array(pmin(.Machine$double.xmax, ps$prior_scale))
+  ps
+}
+
 
 # Return the default scale parameter for 'prior_aux'.
 #
@@ -2428,6 +2501,9 @@ get_extra_grp_info <- function(basic_info, flist, id_var, grp_assoc,
 # @return The list returned by make_assoc_parts.
 handle_assocmod2 <- function(data, assoc, y_mod, e_mod, grp_stuff, meta, j) {
 
+  if (!requireNamespace("dplyr"))
+    stop("the 'dplyr' package must be installed to use this function")
+
   if (!requireNamespace("data.table"))
     stop2("the 'data.table' package must be installed to use this function.")
 
@@ -2442,7 +2518,7 @@ handle_assocmod2 <- function(data, assoc, y_mod, e_mod, grp_stuff, meta, j) {
   fm <- reformulate(tt, response = NULL)
   df <- get_all_vars(fm, data)
   df <- df[complete.cases(df), , drop = FALSE]
-  df <- df[e_mod$assoc_obs, ]
+  #df <- df[e_mod$assoc_obs, ]
 
   # declare df as a data.table for merging with quadrature points
   dt <- prepare_data_table(df,
@@ -2451,11 +2527,17 @@ handle_assocmod2 <- function(data, assoc, y_mod, e_mod, grp_stuff, meta, j) {
                            grp_var  = grp_stuff$grp_var) # grp_var may be NULL
   ids_ <- seq_along( promote_to_factor(unique(df[ ,id_var])) )
 
-  time_state <-  e_mod$cpts + suppressMessages(dplyr::left_join(
-    data.frame(id = e_mod$cids),
-    data.frame(id = ids_,
-               t = e_mod$t_state)
-                              ))$t
+  time_state <-  suppressMessages(dplyr::left_join(
+    data.frame(ids = e_mod$cids,
+               cpts = e_mod$cpts),
+    data.frame(ids = ids_,
+               times_ = e_mod$t_state)
+                              )
+      )
+
+
+  time_state$times <- as.numeric(time_state$cpts) + as.numeric(time_state$times_)
+
 
   # design matrices for calculating association structure based on
   # (possibly lagged) eta, slope, auc and any interactions with data
@@ -2463,12 +2545,11 @@ handle_assocmod2 <- function(data, assoc, y_mod, e_mod, grp_stuff, meta, j) {
                newdata      = dt,
                y_mod        = y_mod,
                grp_stuff    = grp_stuff,
-               meta_stuff   = meta,
+               meta         = meta,
                assoc        = assoc,
                ids          = e_mod$cids,
-               times        = time_state,
+               times        = e_mod$cpts,
                j            = j)
-  return(args)
 
   do.call(make_assoc_parts2, args)
 }
@@ -2543,7 +2624,9 @@ make_assoc_parts2 <- function(use_function = make_assoc_parts_for_stan,
   #   covariate values can be carried). If no time varying covariates are
   #   present in the longitudinal submodel (other than the time variable)
   #   then nothing is carried forward or backward.
+
   dataQ <- rolling_merge(data = newdata, ids = ids, times = times, grps = grps)
+
   mod_eta <- use_function(newdata = dataQ, ...)
 
   # If association structure is based on slope, then calculate design
@@ -2775,7 +2858,7 @@ pars_to_monitor <- function(standata, is_jm = FALSE) {
 #
 # @param e_mod_stuff A list object returned by a call to the handle_coxmod function
 # @param standata The data list that will be passed to Stan
-get_prefit_inits2 <- function(init_fit, e_mod, prior_stuff, prior_aux_stuff, standata) {
+get_prefit_inits2 <- function(init_fit, e_mod, assoc_ids, prior_stuff, prior_aux_stuff, standata) {
 
   init_means <- rstan::get_posterior_mean(init_fit)
   init_nms   <- rownames(init_means)
@@ -2783,24 +2866,24 @@ get_prefit_inits2 <- function(init_fit, e_mod, prior_stuff, prior_aux_stuff, sta
 
   sel_b1 <- grep(paste0("^z_bMat1\\."), init_nms)
   if (length(sel_b1))
-    inits[["z_bMat1"]] <- matrix(init_means[sel_b1,], nrow = standata$bK1)
+    inits[["z_bMat1"]] <- matrix(init_means[sel_b1,][assoc_ids], nrow = standata$bK1)
 
   sel_b2 <- grep(paste0("^z_bMat2\\."), init_nms)
   if (length(sel_b2))
-    inits[["z_bMat2"]] <- matrix(init_means[sel_b2,], nrow = standata$bK2)
+    inits[["z_bMat2"]] <- matrix(init_means[sel_b2,][assoc_ids], nrow = standata$bK2)
 
   sel_bC1 <- grep(paste0("^bCholesky1\\."), init_nms)
   if (length(sel_bC1) > 1) {
-    inits[["bCholesky1"]] <- matrix(init_means[sel_bC1,], nrow = standata$bK1)
+    inits[["bCholesky1"]] <- matrix(init_means[sel_bC1,][assoc_ids], nrow = standata$bK1)
   } else if (length(sel_bC1) == 1) {
-    inits[["bCholesky1"]] <- aa(init_means[sel_bC1,])
+    inits[["bCholesky1"]] <- aa(init_means[sel_bC1,][assoc_ids])
   }
 
   sel_bC2 <- grep(paste0("^bCholesky2\\."), init_nms)
   if (length(sel_bC2) > 1) {
-    inits[["bCholesky2"]] <- matrix(init_means[sel_bC2,], nrow = standata$bK2)
+    inits[["bCholesky2"]] <- matrix(init_means[sel_bC2,][assoc_ids], nrow = standata$bK2)
   } else if (length(sel_bC1) == 1) {
-    inits[["bCholesky2"]] <- aa(init_means[sel_bC2,])
+    inits[["bCholesky2"]] <- aa(init_means[sel_bC2,][assoc_ids])
   }
 
   sel <- c("yGamma1", "yGamma2", "yGamma3",
@@ -2814,7 +2897,7 @@ get_prefit_inits2 <- function(init_fit, e_mod, prior_stuff, prior_aux_stuff, sta
   for (i in sel) {
     sel_i <- grep(paste0("^", i, "\\."), init_nms)
     if (length(sel_i))
-      inits[[i]] <- aa(init_means[sel_i,])
+      inits[[i]] <- aa(init_means[sel_i, ])
   }
   return(function() inits)
 }
@@ -3239,4 +3322,518 @@ collapse_within_groups.matrix <- function(eta, grp_idx, grp_assoc) {
     val[,n] = apply(tmp, 1L, grp_assoc)
   }
   val
+}
+
+# Return a matrix with information for stan about which components are
+# required for building the association structure of the joint model
+#
+# @param assoc An array with information on the joint model association struct.
+# @return An indicator matrix, with a row for each component type and a
+#   column for each longitudinal submodel.
+make_assoc_component_flags <- function(assoc) {
+  component_types <- c("etavalue",
+                       "etaslope",
+                       "etaauc",
+                       "muvalue",
+                       "muslope",
+                       "muauc")
+  assoc_uses <- sapply(component_types,
+                       function(x, assoc) {
+                         nm_check <- switch(x,
+                                            etavalue = "^eta|^mu",
+                                            etaslope = "etaslope|muslope",
+                                            etaauc   = "etaauc|muauc",
+                                            muvalue  = "muvalue|muslope",
+                                            muslope  = "muslope",
+                                            muauc    = "muauc")
+                         sel <- grep(nm_check, rownames(assoc))
+                         tmp <- assoc[sel, , drop = FALSE]
+                         tmp <- pad_matrix(tmp, cols = 3L, value = FALSE)
+                         ai(as.logical(colSums(tmp > 0)))
+                       }, assoc = assoc)
+  t(assoc_uses)
+}
+# Return a matrix with information for stan about which association structures
+# are to be used in the association structure
+#
+# @param assoc An array with information on the joint model association struct.
+# @return An indicator matrix, with a row for each possible type of association
+#   structure and a column for each longitudinal submodel.
+make_assoc_type_flags <- function(assoc) {
+  nms <- rownames(assoc)
+  sel <- grep("which|null", nms, invert = TRUE)
+  matrix(ai(assoc[sel,]), ncol = ncol(assoc))
+}
+# Data for handling lower-level clustering in association structure
+standata_add_assoc_grp01 <- function(standata, a_mod, grp_stuff) {
+  has_grp <- fetch_(grp_stuff, "has_grp")
+  if (any(has_grp)) {
+    sel <- which(has_grp)[[1L]]
+    standata$idx_grp91_01 <- attr(a_mod[[sel]], "grp_idx")
+    standata$grp_assoc01 <- switch(grp_assoc,
+                                 sum  = 1L,
+                                 mean = 2L,
+                                 min  = 3L,
+                                 max  = 4L,
+                                 0L)
+  } else { # no lower level clustering
+    standata$idx_grp01   <- matrix(0L, standata$len_cpts01, 2L)
+    standata$grp_assoc01 <- 0L
+  }
+  standata$has_grp01 <- aa(ai(has_grp))
+  standata
+}
+
+# Data for handling lower-level clustering in association structure
+standata_add_assoc_grp02 <- function(standata, a_mod, grp_stuff) {
+  has_grp <- fetch_(grp_stuff, "has_grp")
+  if (any(has_grp)) {
+    sel <- which(has_grp)[[1L]]
+    standata$idx_grp91_02 <- attr(a_mod[[sel]], "grp_idx")
+    standata$grp_assoc02 <- switch(grp_assoc,
+                                   sum  = 1L,
+                                   mean = 2L,
+                                   min  = 3L,
+                                   max  = 4L,
+                                   0L)
+  } else { # no lower level clustering
+    standata$idx_grp02   <- matrix(0L, standata$len_cpts02, 2L)
+    standata$grp_assoc02 <- 0L
+  }
+  standata$has_grp02 <- aa(ai(has_grp))
+  standata
+}
+
+# Data for handling lower-level clustering in association structure
+standata_add_assoc_grp12 <- function(standata, a_mod, grp_stuff) {
+  has_grp <- fetch_(grp_stuff, "has_grp")
+  if (any(has_grp)) {
+    sel <- which(has_grp)[[1L]]
+    standata$idx_grp91_12 <- attr(a_mod[[sel]], "grp_idx")
+    standata$grp_assoc12 <- switch(grp_assoc,
+                                   sum  = 1L,
+                                   mean = 2L,
+                                   min  = 3L,
+                                   max  = 4L,
+                                   0L)
+  } else { # no lower level clustering
+    standata$idx_grp12   <- matrix(0L, standata$len_cpts12, 2L)
+    standata$grp_assoc12 <- 0L
+  }
+  standata$has_grp12 <- aa(ai(has_grp))
+  standata
+}
+
+# Data (design matrices) for the main types of association structure
+standata_add_assoc_xz01 <- function(standata, a_mod, meta, assoc) {
+  cnms_nms <- names(meta$cnms)
+  N_tmp <- sapply(a_mod, function(x) NROW(x$mod_eta$xtemp))
+  N_tmp <- c(N_tmp, rep(0, 3 - length(N_tmp)))
+  standata$y_qrows01 <- as.array(as.integer(N_tmp))
+  for (m in 1:3) {
+    for (i in c("eta", "eps", "auc")) {
+      nm_check <- switch(i,
+                         eta = "^eta|^mu",
+                         eps = "slope",
+                         auc = "auc")
+      sel <- grep(nm_check, rownames(assoc))
+      if (m <= meta$M && any(unlist(assoc[sel,m]))) {
+        tmp_stuff <- a_mod[[m]][[paste0("mod_", i)]]
+
+        # fe design matrix
+        X_tmp <- tmp_stuff$xtemp
+
+        # re design matrix, group factor 1
+        Z1_tmp    <- tmp_stuff$z[[cnms_nms[1L]]]
+        Z1_tmp    <- transpose(Z1_tmp)
+        Z1_tmp    <- convert_null(Z1_tmp, "matrix")
+        Z1_tmp_id <- tmp_stuff$group_list[[cnms_nms[1L]]]
+        Z1_tmp_id <- groups(Z1_tmp_id)
+        Z1_tmp_id <- convert_null(Z1_tmp_id, "arrayinteger")
+
+        # re design matrix, group factor 2
+        if (length(cnms_nms) > 1L) {
+          Z2_tmp    <- tmp_stuff$z[[cnms_nms[2L]]]
+          Z2_tmp    <- transpose(Z2_tmp)
+          Z2_tmp    <- convert_null(Z2_tmp, "matrix")
+          Z2_tmp_id <- tmp_stuff$group_list[[cnms_nms[2L]]]
+          Z2_tmp_id <- groups(Z2_tmp_id)
+          Z2_tmp_id <- convert_null(Z2_tmp_id, "arrayinteger")
+        } else {
+          Z2_tmp    <- matrix(0,standata$bK2_len[m],0)
+          Z2_tmp_id <- aa(integer(0))
+        }
+      } else {
+        X_tmp     <- matrix(0,0,standata$yK[m])
+        Z1_tmp    <- matrix(0,standata$bK1_len[m],0)
+        Z2_tmp    <- matrix(0,standata$bK2_len[m],0)
+        Z1_tmp_id <- aa(integer(0))
+        Z2_tmp_id <- aa(integer(0))
+      }
+      standata[[paste0("y", m, "_x_",     i, "_01")]] <- X_tmp
+      standata[[paste0("y", m, "_z1_",    i, "_01")]] <- Z1_tmp
+      standata[[paste0("y", m, "_z2_",    i, "_01")]] <- Z2_tmp
+      standata[[paste0("y", m, "_z1_id_", i, "_01")]] <- Z1_tmp_id
+      standata[[paste0("y", m, "_z2_id_", i, "_01")]] <- Z2_tmp_id
+    }
+  }
+  standata
+}
+
+# Data (design matrices) for the main types of association structure
+standata_add_assoc_xz02 <- function(standata, a_mod, meta, assoc) {
+  cnms_nms <- names(meta$cnms)
+  N_tmp <- sapply(a_mod, function(x) NROW(x$mod_eta$xtemp))
+  N_tmp <- c(N_tmp, rep(0, 3 - length(N_tmp)))
+  standata$y_qrows02 <- as.array(as.integer(N_tmp))
+  for (m in 1:3) {
+    for (i in c("eta", "eps", "auc")) {
+      nm_check <- switch(i,
+                         eta = "^eta|^mu",
+                         eps = "slope",
+                         auc = "auc")
+      sel <- grep(nm_check, rownames(assoc))
+      if (m <= meta$M && any(unlist(assoc[sel,m]))) {
+        tmp_stuff <- a_mod[[m]][[paste0("mod_", i)]]
+
+        # fe design matrix
+        X_tmp <- tmp_stuff$xtemp
+
+        # re design matrix, group factor 1
+        Z1_tmp    <- tmp_stuff$z[[cnms_nms[1L]]]
+        Z1_tmp    <- transpose(Z1_tmp)
+        Z1_tmp    <- convert_null(Z1_tmp, "matrix")
+        Z1_tmp_id <- tmp_stuff$group_list[[cnms_nms[1L]]]
+        Z1_tmp_id <- groups(Z1_tmp_id)
+        Z1_tmp_id <- convert_null(Z1_tmp_id, "arrayinteger")
+
+        # re design matrix, group factor 2
+        if (length(cnms_nms) > 1L) {
+          Z2_tmp    <- tmp_stuff$z[[cnms_nms[2L]]]
+          Z2_tmp    <- transpose(Z2_tmp)
+          Z2_tmp    <- convert_null(Z2_tmp, "matrix")
+          Z2_tmp_id <- tmp_stuff$group_list[[cnms_nms[2L]]]
+          Z2_tmp_id <- groups(Z2_tmp_id)
+          Z2_tmp_id <- convert_null(Z2_tmp_id, "arrayinteger")
+        } else {
+          Z2_tmp    <- matrix(0,standata$bK2_len[m],0)
+          Z2_tmp_id <- aa(integer(0))
+        }
+      } else {
+        X_tmp     <- matrix(0,0,standata$yK[m])
+        Z1_tmp    <- matrix(0,standata$bK1_len[m],0)
+        Z2_tmp    <- matrix(0,standata$bK2_len[m],0)
+        Z1_tmp_id <- aa(integer(0))
+        Z2_tmp_id <- aa(integer(0))
+      }
+      standata[[paste0("y", m, "_x_",     i, "_02")]] <- X_tmp
+      standata[[paste0("y", m, "_z1_",    i, "_02")]] <- Z1_tmp
+      standata[[paste0("y", m, "_z2_",    i, "_02")]] <- Z2_tmp
+      standata[[paste0("y", m, "_z1_id_", i, "_02")]] <- Z1_tmp_id
+      standata[[paste0("y", m, "_z2_id_", i, "_02")]] <- Z2_tmp_id
+    }
+  }
+  standata
+}
+
+
+# Data (design matrices) for the main types of association structure
+standata_add_assoc_xz12 <- function(standata, a_mod, meta, assoc) {
+  cnms_nms <- names(meta$cnms)
+  N_tmp <- sapply(a_mod, function(x) NROW(x$mod_eta$xtemp))
+  N_tmp <- c(N_tmp, rep(0, 3 - length(N_tmp)))
+  standata$y_qrows12 <- as.array(as.integer(N_tmp))
+  for (m in 1:3) {
+    for (i in c("eta", "eps", "auc")) {
+      nm_check <- switch(i,
+                         eta = "^eta|^mu",
+                         eps = "slope",
+                         auc = "auc")
+      sel <- grep(nm_check, rownames(assoc))
+      if (m <= meta$M && any(unlist(assoc[sel,m]))) {
+        tmp_stuff <- a_mod[[m]][[paste0("mod_", i)]]
+
+        # fe design matrix
+        X_tmp <- tmp_stuff$xtemp
+
+        # re design matrix, group factor 1
+        Z1_tmp    <- tmp_stuff$z[[cnms_nms[1L]]]
+        Z1_tmp    <- transpose(Z1_tmp)
+        Z1_tmp    <- convert_null(Z1_tmp, "matrix")
+        Z1_tmp_id <- tmp_stuff$group_list[[cnms_nms[1L]]]
+        Z1_tmp_id <- groups(Z1_tmp_id)
+        Z1_tmp_id <- convert_null(Z1_tmp_id, "arrayinteger")
+
+        # re design matrix, group factor 2
+        if (length(cnms_nms) > 1L) {
+          Z2_tmp    <- tmp_stuff$z[[cnms_nms[2L]]]
+          Z2_tmp    <- transpose(Z2_tmp)
+          Z2_tmp    <- convert_null(Z2_tmp, "matrix")
+          Z2_tmp_id <- tmp_stuff$group_list[[cnms_nms[2L]]]
+          Z2_tmp_id <- groups(Z2_tmp_id)
+          Z2_tmp_id <- convert_null(Z2_tmp_id, "arrayinteger")
+        } else {
+          Z2_tmp    <- matrix(0,standata$bK2_len[m],0)
+          Z2_tmp_id <- aa(integer(0))
+        }
+      } else {
+        X_tmp     <- matrix(0,0,standata$yK[m])
+        Z1_tmp    <- matrix(0,standata$bK1_len[m],0)
+        Z2_tmp    <- matrix(0,standata$bK2_len[m],0)
+        Z1_tmp_id <- aa(integer(0))
+        Z2_tmp_id <- aa(integer(0))
+      }
+      standata[[paste0("y", m, "_x_",     i, "_12")]] <- X_tmp
+      standata[[paste0("y", m, "_z1_",    i, "_12")]] <- Z1_tmp
+      standata[[paste0("y", m, "_z2_",    i, "_12")]] <- Z2_tmp
+      standata[[paste0("y", m, "_z1_id_", i, "_12")]] <- Z1_tmp_id
+      standata[[paste0("y", m, "_z2_id_", i, "_12")]] <- Z2_tmp_id
+    }
+  }
+  standata
+}
+
+
+# Dimensions for auc association structure
+standata_add_assoc_auc <- function(standata, a_mod, meta) {
+
+  count_rows <- function(i) {
+    nr <- NROW(i$mod_auc$x)
+    if (nr > 0) nr else NULL
+  }
+
+  nrow_y_x_auc <- unique(uapply(a_mod, count_rows))
+  if (length(nrow_y_x_auc) > 1L)
+    stop2("Bug found: nrows for auc should be the same for all submodels.")
+  qnodes <- meta$auc_qnodes
+  uses_auc_assoc <- any(standata$assoc_uses[3,] > 0)
+  if (uses_auc_assoc) {
+    qw   <- get_quadpoints(qnodes)$weights
+    qfun <- function(i) lapply(qw, unstandardise_qwts, 0, i)
+    standata$auc_qwts <- aa(uapply(standata$cpts, qfun))
+  } else {
+    standata$auc_qwts <- double(0)
+  }
+  standata$auc_qnodes <- ai(qnodes)
+  standata$y_qrows_for_auc <- ai(nrow_y_x_auc %ORifNULL% 0)
+  standata
+}
+
+
+# Dimensions for auc association structure
+standata_add_assoc_auc01 <- function(standata, a_mod, meta, j) {
+
+  count_rows <- function(i) {
+    nr <- NROW(i$mod_auc$x)
+    if (nr > 0) nr else NULL
+  }
+
+  nrow_y_x_auc <- unique(uapply(a_mod, count_rows))
+  if (length(nrow_y_x_auc) > 1L)
+    stop2("Bug found: nrows for auc should be the same for all submodels.")
+  qnodes <- meta$auc_qnodes[j]
+  uses_auc_assoc <- any(standata$assoc_uses01[3,] > 0)
+  if (uses_auc_assoc) {
+    qw   <- get_quadpoints(qnodes)$weights
+    qfun <- function(i) lapply(qw, unstandardise_qwts, 0, i)
+    standata$auc_qwts01 <- aa(uapply(standata$cpts, qfun))
+  } else {
+    standata$auc_qwts01 <- double(0)
+  }
+  standata$auc_qnodes01 <- ai(qnodes)
+  standata$y_qrows_for_auc01 <- ai(nrow_y_x_auc %ORifNULL% 0)
+  standata
+}
+
+
+# Dimensions for auc association structure
+standata_add_assoc_auc02 <- function(standata, a_mod, meta, j) {
+
+  count_rows <- function(i) {
+    nr <- NROW(i$mod_auc$x)
+    if (nr > 0) nr else NULL
+  }
+
+  nrow_y_x_auc <- unique(uapply(a_mod, count_rows))
+  if (length(nrow_y_x_auc) > 1L)
+    stop2("Bug found: nrows for auc should be the same for all submodels.")
+  qnodes <- meta$auc_qnodes[j]
+  uses_auc_assoc <- any(standata$assoc_uses02[3,] > 0)
+  if (uses_auc_assoc) {
+    qw   <- get_quadpoints(qnodes)$weights
+    qfun <- function(i) lapply(qw, unstandardise_qwts, 0, i)
+    standata$auc_qwts02 <- aa(uapply(standata$cpts, qfun))
+  } else {
+    standata$auc_qwts02 <- double(0)
+  }
+  standata$auc_qnodes02 <- ai(qnodes)
+  standata$y_qrows_for_auc02 <- ai(nrow_y_x_auc %ORifNULL% 0)
+  standata
+}
+
+# Dimensions for auc association structure
+standata_add_assoc_auc12 <- function(standata, a_mod, meta, j) {
+
+  count_rows <- function(i) {
+    nr <- NROW(i$mod_auc$x)
+    if (nr > 0) nr else NULL
+  }
+
+  nrow_y_x_auc <- unique(uapply(a_mod, count_rows))
+  if (length(nrow_y_x_auc) > 1L)
+    stop2("Bug found: nrows for auc should be the same for all submodels.")
+  qnodes <- meta$auc_qnodes[j]
+  uses_auc_assoc <- any(standata$assoc_uses12[3,] > 0)
+  if (uses_auc_assoc) {
+    qw   <- get_quadpoints(qnodes)$weights
+    qfun <- function(i) lapply(qw, unstandardise_qwts, 0, i)
+    standata$auc_qwts12 <- aa(uapply(standata$cpts, qfun))
+  } else {
+    standata$auc_qwts12 <- double(0)
+  }
+  standata$auc_qnodes12 <- ai(qnodes)
+  standata$y_qrows_for_auc12 <- ai(nrow_y_x_auc %ORifNULL% 0)
+  standata
+}
+
+# Data for interaction-based and shared parameter association structures
+standata_add_assoc_extras <- function(standata, a_mod, assoc) {
+
+  # interactions between association terms and data, with the following objects:
+  #   a_K_data: number of columns in y_Xq_data corresponding to each interaction
+  #     type (ie, etavalue, etaslope, muvalue, muslope) for each submodel
+  #   idx_q: indexing for the rows of Xq_data that correspond to each submodel,
+  #     since it is formed as a block diagonal matrix
+  xq_data <- fetch(a_mod, "X_bind_data") # design mat for the interactions
+  standata$y_x_data <- aa(am(Matrix::bdiag(xq_data)))
+  standata$a_K_data <- fetch_array(a_mod, "K_data")
+  standata$idx_data <- get_idx_array(standata$y_qrows)
+
+  # interactions between association terms
+  wi <- "which_interactions"
+  standata$which_interactions      <- aa(unlist(assoc[wi,]))
+  standata$size_which_interactions <-  c(sapply(assoc[wi,], sapply, length))
+
+  # shared random effects
+  wbz <- "which_b_zindex"
+  wcz <- "which_coef_zindex"
+  wcx <- "which_coef_zindex"
+  standata$which_b_zindex    <- aa(unlist(assoc[wbz,]))
+  standata$which_coef_zindex <- aa(unlist(assoc[wcz,]))
+  standata$which_coef_xindex <- aa(unlist(assoc[wcx,]))
+  standata$size_which_b      <- aa(sapply(assoc[wbz,], length))
+  standata$size_which_coef   <- aa(sapply(assoc[wcz,], length))
+
+  # sum dimensions
+  for (i in c("a_K_data", paste0("size_which_", c("b", "coef", "interactions")))) {
+    standata[[paste0("sum_", i)]] <- ai(sum(standata[[i]]))
+  }
+  standata
+}
+
+
+# Data for interaction-based and shared parameter association structures
+standata_add_assoc_extras01 <- function(standata, a_mod, assoc) {
+
+  # interactions between association terms and data, with the following objects:
+  #   a_K_data: number of columns in y_Xq_data corresponding to each interaction
+  #     type (ie, etavalue, etaslope, muvalue, muslope) for each submodel
+  #   idx_q: indexing for the rows of Xq_data that correspond to each submodel,
+  #     since it is formed as a block diagonal matrix
+  xq_data <- fetch(a_mod, "X_bind_data") # design mat for the interactions
+  standata$y_x_data01 <- aa(am(Matrix::bdiag(xq_data)))
+  standata$a_K_data01 <- fetch_array(a_mod, "K_data")
+  standata$idx_data01 <- get_idx_array(standata$y_qrows01)
+
+  # interactions between association terms
+  wi <- "which_interactions"
+  standata$which_interactions01      <- aa(unlist(assoc[wi,]))
+  standata$size_which_interactions01 <-  c(sapply(assoc[wi,], sapply, length))
+
+  # shared random effects
+  wbz <- "which_b_zindex"
+  wcz <- "which_coef_zindex"
+  wcx <- "which_coef_zindex"
+  standata$which_b_zindex01    <- aa(unlist(assoc[wbz,]))
+  standata$which_coef_zindex01 <- aa(unlist(assoc[wcz,]))
+  standata$which_coef_xindex01 <- aa(unlist(assoc[wcx,]))
+  standata$size_which_b01      <- aa(sapply(assoc[wbz,], length))
+  standata$size_which_coef01   <- aa(sapply(assoc[wcz,], length))
+
+  # sum dimensions
+  for (i in c("a_K_data01", paste0("size_which_", c("b01", "coef01", "interactions01")))) {
+    standata[[paste0("sum_", i, "_01")]] <- ai(sum(standata[[i]]))
+  }
+  standata
+}
+
+
+# Data for interaction-based and shared parameter association structures
+standata_add_assoc_extras02 <- function(standata, a_mod, assoc) {
+
+  # interactions between association terms and data, with the following objects:
+  #   a_K_data: number of columns in y_Xq_data corresponding to each interaction
+  #     type (ie, etavalue, etaslope, muvalue, muslope) for each submodel
+  #   idx_q: indexing for the rows of Xq_data that correspond to each submodel,
+  #     since it is formed as a block diagonal matrix
+  xq_data <- fetch(a_mod, "X_bind_data") # design mat for the interactions
+  standata$y_x_data02 <- aa(am(Matrix::bdiag(xq_data)))
+  standata$a_K_data02 <- fetch_array(a_mod, "K_data")
+  standata$idx_data02 <- get_idx_array(standata$y_qrows02)
+
+  # interactions between association terms
+  wi <- "which_interactions"
+  standata$which_interactions02      <- aa(unlist(assoc[wi,]))
+  standata$size_which_interactions02 <-  c(sapply(assoc[wi,], sapply, length))
+
+  # shared random effects
+  wbz <- "which_b_zindex"
+  wcz <- "which_coef_zindex"
+  wcx <- "which_coef_zindex"
+  standata$which_b_zindex02    <- aa(unlist(assoc[wbz,]))
+  standata$which_coef_zindex02 <- aa(unlist(assoc[wcz,]))
+  standata$which_coef_xindex02 <- aa(unlist(assoc[wcx,]))
+  standata$size_which_b02      <- aa(sapply(assoc[wbz,], length))
+  standata$size_which_coef02   <- aa(sapply(assoc[wcz,], length))
+
+  # sum dimensions
+  for (i in c("a_K_data02", paste0("size_which_", c("b02", "coef02", "interactions02")))) {
+    standata[[paste0("sum_", i, "_02")]] <- ai(sum(standata[[i]]))
+  }
+  standata
+}
+
+# Data for interaction-based and shared parameter association structures
+standata_add_assoc_extras12 <- function(standata, a_mod, assoc) {
+
+  # interactions between association terms and data, with the following objects:
+  #   a_K_data: number of columns in y_Xq_data corresponding to each interaction
+  #     type (ie, etavalue, etaslope, muvalue, muslope) for each submodel
+  #   idx_q: indexing for the rows of Xq_data that correspond to each submodel,
+  #     since it is formed as a block diagonal matrix
+  xq_data <- fetch(a_mod, "X_bind_data") # design mat for the interactions
+  standata$y_x_data12 <- aa(am(Matrix::bdiag(xq_data)))
+  standata$a_K_data12 <- fetch_array(a_mod, "K_data")
+  standata$idx_data12 <- get_idx_array(standata$y_qrows12)
+
+  # interactions between association terms
+  wi <- "which_interactions"
+  standata$which_interactions12      <- aa(unlist(assoc[wi,]))
+  standata$size_which_interactions12 <-  c(sapply(assoc[wi,], sapply, length))
+
+  # shared random effects
+  wbz <- "which_b_zindex"
+  wcz <- "which_coef_zindex"
+  wcx <- "which_coef_zindex"
+  standata$which_b_zindex12    <- aa(unlist(assoc[wbz,]))
+  standata$which_coef_zindex12 <- aa(unlist(assoc[wcz,]))
+  standata$which_coef_xindex12 <- aa(unlist(assoc[wcx,]))
+  standata$size_which_b12      <- aa(sapply(assoc[wbz,], length))
+  standata$size_which_coef12   <- aa(sapply(assoc[wcz,], length))
+
+  # sum dimensions
+  for (i in c("a_K_data12", paste0("size_which_", c("b12", "coef12", "interactions12")))) {
+    standata[[paste0("sum_", i, "_12")]] <- ai(sum(standata[[i]]))
+  }
+  standata
 }
