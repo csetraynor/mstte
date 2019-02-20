@@ -1549,7 +1549,9 @@ msjm_stan <- function(formulaLong,
     # centering for association terms
     standata$a_xbar12  <- if (a_K[[3]]) e_prior_assoc_stuff[,3]$a_xbar else numeric(0)
 
-  } # end jm block
+  } # end msjm block
+
+  return(standata)
 
   #---------------
   # Prior summary

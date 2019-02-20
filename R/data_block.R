@@ -3762,7 +3762,7 @@ standata_add_assoc_extras01 <- function(standata, a_mod, assoc) {
 
   # sum dimensions
   for (i in c("a_K_data01", paste0("size_which_", c("b01", "coef01", "interactions01")))) {
-    standata[[paste0("sum_", i, "_01")]] <- ai(sum(standata[[i]]))
+    standata[[paste0("sum_", i)]] <- ai(sum(standata[[i]]))
   }
   standata
 }
@@ -3798,7 +3798,7 @@ standata_add_assoc_extras02 <- function(standata, a_mod, assoc) {
 
   # sum dimensions
   for (i in c("a_K_data02", paste0("size_which_", c("b02", "coef02", "interactions02")))) {
-    standata[[paste0("sum_", i, "_02")]] <- ai(sum(standata[[i]]))
+    standata[[paste0("sum_", i)]] <- ai(sum(standata[[i]]))
   }
   standata
 }
@@ -3833,7 +3833,7 @@ standata_add_assoc_extras12 <- function(standata, a_mod, assoc) {
 
   # sum dimensions
   for (i in c("a_K_data12", paste0("size_which_", c("b12", "coef12", "interactions12")))) {
-    standata[[paste0("sum_", i, "_12")]] <- ai(sum(standata[[i]]))
+    standata[[paste0("sum_", i)]] <- ai(sum(standata[[i]]))
   }
   standata
 }

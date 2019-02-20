@@ -1905,7 +1905,1570 @@ data {
   //   y{1,2,3}_x_        {eta,eps,auc}_cpts
   //   y{1,2,3}_z{1,2}_   {eta,eps,auc}_cpts
   //   y{1,2,3}_z{1,2}_id_{eta,eps,auc}_cpts
+    // prior family:
+  //   0 = none
+  //   1 = normal
+  //   2 = student_t
+  //   3 = hs
+  //   4 = hs_plus
+  //   5 = laplace
+  //   6 = lasso
+  int<lower=0,upper=6> a_prior_dist01;  // prior for assoc params
+
+  //--- dimensions for association structure
+
+    // num. of association parameters
+    int<lower=0> a_K01;
+
+    // used for centering assoc terms
+    vector[a_K01] a_xbar01;
+
+    // 0 = no assoc structure, 1 = any assoc structure
+    int<lower=0,upper=1> assoc01;
+
+    // which components are required to build association terms
+    int<lower=0,upper=1> assoc_uses01[6,3];
+
+    // which association terms does each submodel use
+    int<lower=0,upper=1> has_assoc01[16,M];
+
+    // num. of shared random effects
+    int<lower=0> sum_size_which_b01;
+
+    // num. of shared random effects for each long submodel
+    int<lower=0> size_which_b01[M];
+
+    // which random effects are shared for each long submodel
+    int<lower=1> which_b_zindex[sum_size_which_b01];
+
+    // num. of shared random effects incl fixed component
+    int<lower=0> sum_size_which_coef01;
+
+    // num. of shared random effects incl fixed component for each long submodel
+    int<lower=0> size_which_coef01[M];
+
+    // which random effects are shared incl fixed component
+    int<lower=1> which_coef_zindex01[sum_size_which_coef01];
+
+    // which fixed effects are shared
+    int<lower=1> which_coef_xindex01[sum_size_which_coef01];
+
+    // total num pars used in assoc*assoc interactions
+    int<lower=0> sum_size_which_interactions01;
+
+    // num pars used in assoc*assoc interactions, by submodel
+    //   and by evev/evmv/mvev/mvmv interactions
+    int<lower=0,upper=sum_size_which_interactions01> size_which_interactions01[M*4];
+
+    // which terms to interact with
+    int<lower=1> which_interactions01[sum_size_which_interactions01];
+
+    // num. rows in long. predictor matrix
+    int<lower=0> y_qrows01[3];
+
+  //---- data for calculating eta in GK quadrature
+
+    // fe design matrices
+
+    matrix[assoc_uses01[1,1] == 1 ? y_qrows01[1] : 0, yK01[1]] y1_x_eta01;
+    matrix[assoc_uses01[1,2] == 1 ? y_qrows01[2] : 0, yK01[2]] y2_x_eta01;
+    matrix[assoc_uses01[1,3] == 1 ? y_qrows01[3] : 0, yK01[3]] y3_x_eta01;
+
+    // re design matrices, group factor 1
+
+    vector[assoc_uses01[1,1] == 1 && bK1_len[1] > 0 ? y_qrows01[1] : 0] y1_z1_eta01[bK1_len[1]];
+    vector[assoc_uses01[1,2] == 1 && bK1_len[2] > 0 ? y_qrows01[2] : 0] y2_z1_eta01[bK1_len[2]];
+    vector[assoc_uses01[1,3] == 1 && bK1_len[3] > 0 ? y_qrows01[3] : 0] y3_z1_eta01[bK1_len[3]];
+
+    // re design matrices, group factor 2
+
+    vector[assoc_uses01[1,1] == 1 && bK2_len[1] > 0 ? y_qrows01[1] : 0] y1_z2_eta01[bK2_len[1]];
+    vector[assoc_uses01[1,2] == 1 && bK2_len[2] > 0 ? y_qrows01[2] : 0] y2_z2_eta01[bK2_len[2]];
+    vector[assoc_uses01[1,3] == 1 && bK2_len[3] > 0 ? y_qrows01[3] : 0] y3_z2_eta01[bK2_len[3]];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z1_id_eta01[assoc_uses01[1,1] == 1 && bK1_len[1] > 0 ? y_qrows01[1] : 0];
+    int<lower=0> y2_z1_id_eta01[assoc_uses01[1,2] == 1 && bK1_len[2] > 0 ? y_qrows01[2] : 0];
+    int<lower=0> y3_z1_id_eta01[assoc_uses01[1,3] == 1 && bK1_len[3] > 0 ? y_qrows01[3] : 0];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z2_id_eta01[assoc_uses01[1,1] == 1 && bK2_len[1] > 0 ? y_qrows01[1] : 0];
+    int<lower=0> y2_z2_id_eta01[assoc_uses01[1,2] == 1 && bK2_len[2] > 0 ? y_qrows01[2] : 0];
+    int<lower=0> y3_z2_id_eta01[assoc_uses01[1,3] == 1 && bK2_len[3] > 0 ? y_qrows01[3] : 0];
+
+  //---- data for calculating derivative of eta in GK quadrature
+
+    // fe design matrices
+
+    matrix[assoc_uses01[2,1] == 1 ? y_qrows01[1] : 0, yK[1]] y1_x_eps_01;
+    matrix[assoc_uses01[2,2] == 1 ? y_qrows01[2] : 0, yK[2]] y2_x_eps_01;
+    matrix[assoc_uses01[2,3] == 1 ? y_qrows01[3] : 0, yK[3]] y3_x_eps_01;
+
+    // re design matrices, group factor 1
+
+    vector[assoc_uses01[2,1] == 1 && bK1_len[1] > 0 ? y_qrows01[1] : 0] y1_z1_eps_01[bK1_len[1]];
+    vector[assoc_uses01[2,2] == 1 && bK1_len[2] > 0 ? y_qrows01[2] : 0] y2_z1_eps_01[bK1_len[2]];
+    vector[assoc_uses01[2,3] == 1 && bK1_len[3] > 0 ? y_qrows01[3] : 0] y3_z1_eps_01[bK1_len[3]];
+
+    // re design matrices, group factor 2
+
+    vector[assoc_uses01[2,1] == 1 && bK2_len[1] > 0 ? y_qrows01[1] : 0] y1_z2_eps_01[bK2_len[1]];
+    vector[assoc_uses01[2,2] == 1 && bK2_len[2] > 0 ? y_qrows01[2] : 0] y2_z2_eps_01[bK2_len[2]];
+    vector[assoc_uses01[2,3] == 1 && bK2_len[3] > 0 ? y_qrows01[3] : 0] y3_z2_eps_01[bK2_len[3]];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z1_id_eps_01[assoc_uses01[2,1] == 1 && bK1_len[1] > 0 ? y_qrows01[1] : 0];
+    int<lower=0> y2_z1_id_eps_01[assoc_uses01[2,2] == 1 && bK1_len[2] > 0 ? y_qrows01[2] : 0];
+    int<lower=0> y3_z1_id_eps_01[assoc_uses01[2,3] == 1 && bK1_len[3] > 0 ? y_qrows01[3] : 0];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z2_id_eps_01[assoc_uses01[2,1] == 1 && bK2_len[1] > 0 ? y_qrows01[1] : 0];
+    int<lower=0> y2_z2_id_eps_01[assoc_uses01[2,2] == 1 && bK2_len[2] > 0 ? y_qrows01[2] : 0];
+    int<lower=0> y3_z2_id_eps_01[assoc_uses01[2,3] == 1 && bK2_len[3] > 0 ? y_qrows01[3] : 0];
+
+  //---- data for calculating integral of eta in GK quadrature
+
+    int<lower=0> auc_qnodes01;      // num. of quadnodes for AUC of biomarker trajectory
+    int<lower=0> y_qrows_for_auc01; // num. rows in long. predictor matrix at auc qpts
+    vector[sum(assoc_uses01[3,]) > 0 ? y_qrows_for_auc01 : 0] auc_qwts;
+
+    // fe design matrices
+
+    matrix[assoc_uses01[3,1] == 1 ? y_qrows_for_auc01 : 0, yK[1]] y1_x_auc01;
+    matrix[assoc_uses01[3,2] == 1 ? y_qrows_for_auc01 : 0, yK[2]] y2_x_auc01;
+    matrix[assoc_uses01[3,3] == 1 ? y_qrows_for_auc01 : 0, yK[3]] y3_x_auc01;
+
+    // re design matrices, group factor 1
+
+    vector[assoc_uses01[3,1] == 1 && bK1_len[1] > 0 ? y_qrows_for_auc01 : 0] y1_z1_auc_01[bK1_len[1]];
+    vector[assoc_uses01[3,2] == 1 && bK1_len[2] > 0 ? y_qrows_for_auc01 : 0] y2_z1_auc_01[bK1_len[2]];
+    vector[assoc_uses01[3,3] == 1 && bK1_len[3] > 0 ? y_qrows_for_auc01 : 0] y3_z1_auc_01[bK1_len[3]];
+
+    // re design matrices, group factor 2
+
+    vector[assoc_uses01[3,1] == 1 && bK2_len[1] > 0 ? y_qrows_for_auc01 : 0] y1_z2_auc_01[bK2_len[1]];
+    vector[assoc_uses01[3,2] == 1 && bK2_len[2] > 0 ? y_qrows_for_auc01 : 0] y2_z2_auc_01[bK2_len[2]];
+    vector[assoc_uses01[3,3] == 1 && bK2_len[3] > 0 ? y_qrows_for_auc01 : 0] y3_z2_auc_01[bK2_len[3]];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z1_id_auc_01[assoc_uses01[3,1] == 1 && bK1_len[1] > 0 ? y_qrows_for_auc01 : 0];
+    int<lower=0> y2_z1_id_auc_01[assoc_uses01[3,2] == 1 && bK1_len[2] > 0 ? y_qrows_for_auc01 : 0];
+    int<lower=0> y3_z1_id_auc_01[assoc_uses01[3,3] == 1 && bK1_len[3] > 0 ? y_qrows_for_auc01 : 0];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z2_id_auc_01[assoc_uses01[3,1] == 1 && bK2_len[1] > 0 ? y_qrows_for_auc01 : 0];
+    int<lower=0> y2_z2_id_auc_01[assoc_uses01[3,2] == 1 && bK2_len[2] > 0 ? y_qrows_for_auc01 : 0];
+    int<lower=0> y3_z2_id_auc_-1[assoc_uses01[3,3] == 1 && bK2_len[3] > 0 ? y_qrows_for_auc01 : 0];
+
+  //---- data for calculating assoc*data interactions in GK quadrature
+
+    // num assoc pars used in {ev/es/mv/ms}*data interactions
+    int<lower=0,upper=a_K> a_K_data01[M*4];
+
+    // design matrix for interacting with ev/es/mv/ms at quadpoints
+    matrix[sum(y_qrows01[1:M]), sum(a_K_data01)] y_x_data01;
+
+    // indexing specifying rows of y_x_data that correspond to each submodel
+    int<lower=0> idx_data01[3,2];
+
+  //---- data for combining lower level units clustered within patients
+
+    int<lower=0,upper=1> has_grp01[M]; // 1 = has clustering below patient level
+    int<lower=0,upper=4> grp_assoc01;  // 1 = sum, 2 = mean, 3 = min, 4 = max
+    int<lower=0> idx_grp01[len_cpts01,2];
+
+
+   // second
+       // prior family:
+  //   0 = none
+  //   1 = normal
+  //   2 = student_t
+  //   3 = hs
+  //   4 = hs_plus
+  //   5 = laplace
+  //   6 = lasso
+  int<lower=0,upper=6> a_prior_dist02;  // prior for assoc params
+
+  //--- dimensions for association structure
+
+    // num. of association parameters
+    int<lower=0> a_K02;
+
+    // used for centering assoc terms
+    vector[a_K02] a_xbar02;
+
+    // 0 = no assoc structure, 1 = any assoc structure
+    int<lower=0,upper=1> assoc02;
+
+    // which components are required to build association terms
+    int<lower=0,upper=1> assoc_uses02[6,3];
+
+    // which association terms does each submodel use
+    int<lower=0,upper=1> has_assoc02[16,M];
+
+    // num. of shared random effects
+    int<lower=0> sum_size_which_b02;
+
+    // num. of shared random effects for each long submodel
+    int<lower=0> size_which_b02[M];
+
+    // which random effects are shared for each long submodel
+    int<lower=1> which_b_zindex[sum_size_which_b02];
+
+    // num. of shared random effects incl fixed component
+    int<lower=0> sum_size_which_coef02;
+
+    // num. of shared random effects incl fixed component for each long submodel
+    int<lower=0> size_which_coef02[M];
+
+    // which random effects are shared incl fixed component
+    int<lower=1> which_coef_zindex02[sum_size_which_coef02];
+
+    // which fixed effects are shared
+    int<lower=1> which_coef_xindex02[sum_size_which_coef02];
+
+    // total num pars used in assoc*assoc interactions
+    int<lower=0> sum_size_which_interactions02;
+
+    // num pars used in assoc*assoc interactions, by submodel
+    //   and by evev/evmv/mvev/mvmv interactions
+    int<lower=0,upper=sum_size_which_interactions02> size_which_interactions02[M*4];
+
+    // which terms to interact with
+    int<lower=1> which_interactions02[sum_size_which_interactions02];
+
+    // num. rows in long. predictor matrix
+    int<lower=0> y_qrows02[3];
+
+  //---- data for calculating eta in GK quadrature
+
+    // fe design matrices
+
+    matrix[assoc_uses02[1,1] == 1 ? y_qrows02[1] : 0, yK02[1]] y1_x_eta02;
+    matrix[assoc_uses02[1,2] == 1 ? y_qrows02[2] : 0, yK02[2]] y2_x_eta02;
+    matrix[assoc_uses02[1,3] == 1 ? y_qrows02[3] : 0, yK02[3]] y3_x_eta02;
+
+    // re design matrices, group factor 1
+
+    vector[assoc_uses02[1,1] == 1 && bK1_len[1] > 0 ? y_qrows02[1] : 0] y1_z1_eta02[bK1_len[1]];
+    vector[assoc_uses02[1,2] == 1 && bK1_len[2] > 0 ? y_qrows02[2] : 0] y2_z1_eta02[bK1_len[2]];
+    vector[assoc_uses02[1,3] == 1 && bK1_len[3] > 0 ? y_qrows02[3] : 0] y3_z1_eta02[bK1_len[3]];
+
+    // re design matrices, group factor 2
+
+    vector[assoc_uses02[1,1] == 1 && bK2_len[1] > 0 ? y_qrows02[1] : 0] y1_z2_eta02[bK2_len[1]];
+    vector[assoc_uses02[1,2] == 1 && bK2_len[2] > 0 ? y_qrows02[2] : 0] y2_z2_eta02[bK2_len[2]];
+    vector[assoc_uses02[1,3] == 1 && bK2_len[3] > 0 ? y_qrows02[3] : 0] y3_z2_eta02[bK2_len[3]];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z1_id_eta02[assoc_uses02[1,1] == 1 && bK1_len[1] > 0 ? y_qrows02[1] : 0];
+    int<lower=0> y2_z1_id_eta02[assoc_uses02[1,2] == 1 && bK1_len[2] > 0 ? y_qrows02[2] : 0];
+    int<lower=0> y3_z1_id_eta02[assoc_uses02[1,3] == 1 && bK1_len[3] > 0 ? y_qrows02[3] : 0];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z2_id_eta02[assoc_uses02[1,1] == 1 && bK2_len[1] > 0 ? y_qrows02[1] : 0];
+    int<lower=0> y2_z2_id_eta02[assoc_uses02[1,2] == 1 && bK2_len[2] > 0 ? y_qrows02[2] : 0];
+    int<lower=0> y3_z2_id_eta02[assoc_uses02[1,3] == 1 && bK2_len[3] > 0 ? y_qrows02[3] : 0];
+
+  //---- data for calculating derivative of eta in GK quadrature
+
+    // fe design matrices
+
+    matrix[assoc_uses02[2,1] == 1 ? y_qrows02[1] : 0, yK[1]] y1_x_eps_02;
+    matrix[assoc_uses02[2,2] == 1 ? y_qrows02[2] : 0, yK[2]] y2_x_eps_02;
+    matrix[assoc_uses02[2,3] == 1 ? y_qrows02[3] : 0, yK[3]] y3_x_eps_02;
+
+    // re design matrices, group factor 1
+
+    vector[assoc_uses02[2,1] == 1 && bK1_len[1] > 0 ? y_qrows02[1] : 0] y1_z1_eps_02[bK1_len[1]];
+    vector[assoc_uses02[2,2] == 1 && bK1_len[2] > 0 ? y_qrows02[2] : 0] y2_z1_eps_02[bK1_len[2]];
+    vector[assoc_uses02[2,3] == 1 && bK1_len[3] > 0 ? y_qrows02[3] : 0] y3_z1_eps_02[bK1_len[3]];
+
+    // re design matrices, group factor 2
+
+    vector[assoc_uses02[2,1] == 1 && bK2_len[1] > 0 ? y_qrows02[1] : 0] y1_z2_eps_02[bK2_len[1]];
+    vector[assoc_uses02[2,2] == 1 && bK2_len[2] > 0 ? y_qrows02[2] : 0] y2_z2_eps_02[bK2_len[2]];
+    vector[assoc_uses02[2,3] == 1 && bK2_len[3] > 0 ? y_qrows02[3] : 0] y3_z2_eps_02[bK2_len[3]];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z1_id_eps_02[assoc_uses02[2,1] == 1 && bK1_len[1] > 0 ? y_qrows02[1] : 0];
+    int<lower=0> y2_z1_id_eps_02[assoc_uses02[2,2] == 1 && bK1_len[2] > 0 ? y_qrows02[2] : 0];
+    int<lower=0> y3_z1_id_eps_02[assoc_uses02[2,3] == 1 && bK1_len[3] > 0 ? y_qrows02[3] : 0];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z2_id_eps_02[assoc_uses02[2,1] == 1 && bK2_len[1] > 0 ? y_qrows02[1] : 0];
+    int<lower=0> y2_z2_id_eps_02[assoc_uses02[2,2] == 1 && bK2_len[2] > 0 ? y_qrows02[2] : 0];
+    int<lower=0> y3_z2_id_eps_02[assoc_uses02[2,3] == 1 && bK2_len[3] > 0 ? y_qrows02[3] : 0];
+
+  //---- data for calculating integral of eta in GK quadrature
+
+    int<lower=0> auc_qnodes02;      // num. of quadnodes for AUC of biomarker trajectory
+    int<lower=0> y_qrows_for_auc02; // num. rows in long. predictor matrix at auc qpts
+    vector[sum(assoc_uses02[3,]) > 0 ? y_qrows_for_auc02 : 0] auc_qwts;
+
+    // fe design matrices
+
+    matrix[assoc_uses02[3,1] == 1 ? y_qrows_for_auc02 : 0, yK[1]] y1_x_auc02;
+    matrix[assoc_uses02[3,2] == 1 ? y_qrows_for_auc02 : 0, yK[2]] y2_x_auc02;
+    matrix[assoc_uses02[3,3] == 1 ? y_qrows_for_auc02 : 0, yK[3]] y3_x_auc02;
+
+    // re design matrices, group factor 1
+
+    vector[assoc_uses02[3,1] == 1 && bK1_len[1] > 0 ? y_qrows_for_auc02 : 0] y1_z1_auc_02[bK1_len[1]];
+    vector[assoc_uses02[3,2] == 1 && bK1_len[2] > 0 ? y_qrows_for_auc02 : 0] y2_z1_auc_02[bK1_len[2]];
+    vector[assoc_uses02[3,3] == 1 && bK1_len[3] > 0 ? y_qrows_for_auc02 : 0] y3_z1_auc_02[bK1_len[3]];
+
+    // re design matrices, group factor 2
+
+    vector[assoc_uses02[3,1] == 1 && bK2_len[1] > 0 ? y_qrows_for_auc02 : 0] y1_z2_auc_02[bK2_len[1]];
+    vector[assoc_uses02[3,2] == 1 && bK2_len[2] > 0 ? y_qrows_for_auc02 : 0] y2_z2_auc_02[bK2_len[2]];
+    vector[assoc_uses02[3,3] == 1 && bK2_len[3] > 0 ? y_qrows_for_auc02 : 0] y3_z2_auc_02[bK2_len[3]];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z1_id_auc_02[assoc_uses02[3,1] == 1 && bK1_len[1] > 0 ? y_qrows_for_auc02 : 0];
+    int<lower=0> y2_z1_id_auc_02[assoc_uses02[3,2] == 1 && bK1_len[2] > 0 ? y_qrows_for_auc02 : 0];
+    int<lower=0> y3_z1_id_auc_02[assoc_uses02[3,3] == 1 && bK1_len[3] > 0 ? y_qrows_for_auc02 : 0];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z2_id_auc_02[assoc_uses02[3,1] == 1 && bK2_len[1] > 0 ? y_qrows_for_auc02 : 0];
+    int<lower=0> y2_z2_id_auc_02[assoc_uses02[3,2] == 1 && bK2_len[2] > 0 ? y_qrows_for_auc02 : 0];
+    int<lower=0> y3_z2_id_auc_-1[assoc_uses02[3,3] == 1 && bK2_len[3] > 0 ? y_qrows_for_auc02 : 0];
+
+  //---- data for calculating assoc*data interactions in GK quadrature
+
+    // num assoc pars used in {ev/es/mv/ms}*data interactions
+    int<lower=0,upper=a_K> a_K_data02[M*4];
+
+    // design matrix for interacting with ev/es/mv/ms at quadpoints
+    matrix[sum(y_qrows02[1:M]), sum(a_K_data02)] y_x_data02;
+
+    // indexing specifying rows of y_x_data that correspond to each submodel
+    int<lower=0> idx_data02[3,2];
+
+  //---- data for combining lower level units clustered within patients
+
+    int<lower=0,upper=1> has_grp02[M]; // 1 = has clustering below patient level
+    int<lower=0,upper=4> grp_assoc02;  // 1 = sum, 2 = mean, 3 = min, 4 = max
+    int<lower=0> idx_grp02[len_cpts02,2];
+
+
+    // third
+        // prior family:
+  //   0 = none
+  //   1 = normal
+  //   2 = student_t
+  //   3 = hs
+  //   4 = hs_plus
+  //   5 = laplace
+  //   6 = lasso
+  int<lower=0,upper=6> a_prior_dist12;  // prior for assoc params
+
+  //--- dimensions for association structure
+
+    // num. of association parameters
+    int<lower=0> a_K12;
+
+    // used for centering assoc terms
+    vector[a_K12] a_xbar12;
+
+    // 0 = no assoc structure, 1 = any assoc structure
+    int<lower=0,upper=1> assoc12;
+
+    // which components are required to build association terms
+    int<lower=0,upper=1> assoc_uses12[6,3];
+
+    // which association terms does each submodel use
+    int<lower=0,upper=1> has_assoc12[16,M];
+
+    // num. of shared random effects
+    int<lower=0> sum_size_which_b12;
+
+    // num. of shared random effects for each long submodel
+    int<lower=0> size_which_b12[M];
+
+    // which random effects are shared for each long submodel
+    int<lower=1> which_b_zindex[sum_size_which_b12];
+
+    // num. of shared random effects incl fixed component
+    int<lower=0> sum_size_which_coef12;
+
+    // num. of shared random effects incl fixed component for each long submodel
+    int<lower=0> size_which_coef12[M];
+
+    // which random effects are shared incl fixed component
+    int<lower=1> which_coef_zindex12[sum_size_which_coef12];
+
+    // which fixed effects are shared
+    int<lower=1> which_coef_xindex12[sum_size_which_coef12];
+
+    // total num pars used in assoc*assoc interactions
+    int<lower=0> sum_size_which_interactions12;
+
+    // num pars used in assoc*assoc interactions, by submodel
+    //   and by evev/evmv/mvev/mvmv interactions
+    int<lower=0,upper=sum_size_which_interactions12> size_which_interactions12[M*4];
+
+    // which terms to interact with
+    int<lower=1> which_interactions12[sum_size_which_interactions12];
+
+    // num. rows in long. predictor matrix
+    int<lower=0> y_qrows12[3];
+
+  //---- data for calculating eta in GK quadrature
+
+    // fe design matrices
+
+    matrix[assoc_uses12[1,1] == 1 ? y_qrows12[1] : 0, yK12[1]] y1_x_eta12;
+    matrix[assoc_uses12[1,2] == 1 ? y_qrows12[2] : 0, yK12[2]] y2_x_eta12;
+    matrix[assoc_uses12[1,3] == 1 ? y_qrows12[3] : 0, yK12[3]] y3_x_eta12;
+
+    // re design matrices, group factor 1
+
+    vector[assoc_uses12[1,1] == 1 && bK1_len[1] > 0 ? y_qrows12[1] : 0] y1_z1_eta12[bK1_len[1]];
+    vector[assoc_uses12[1,2] == 1 && bK1_len[2] > 0 ? y_qrows12[2] : 0] y2_z1_eta12[bK1_len[2]];
+    vector[assoc_uses12[1,3] == 1 && bK1_len[3] > 0 ? y_qrows12[3] : 0] y3_z1_eta12[bK1_len[3]];
+
+    // re design matrices, group factor 2
+
+    vector[assoc_uses12[1,1] == 1 && bK2_len[1] > 0 ? y_qrows12[1] : 0] y1_z2_eta12[bK2_len[1]];
+    vector[assoc_uses12[1,2] == 1 && bK2_len[2] > 0 ? y_qrows12[2] : 0] y2_z2_eta12[bK2_len[2]];
+    vector[assoc_uses12[1,3] == 1 && bK2_len[3] > 0 ? y_qrows12[3] : 0] y3_z2_eta12[bK2_len[3]];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z1_id_eta12[assoc_uses12[1,1] == 1 && bK1_len[1] > 0 ? y_qrows12[1] : 0];
+    int<lower=0> y2_z1_id_eta12[assoc_uses12[1,2] == 1 && bK1_len[2] > 0 ? y_qrows12[2] : 0];
+    int<lower=0> y3_z1_id_eta12[assoc_uses12[1,3] == 1 && bK1_len[3] > 0 ? y_qrows12[3] : 0];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z2_id_eta12[assoc_uses12[1,1] == 1 && bK2_len[1] > 0 ? y_qrows12[1] : 0];
+    int<lower=0> y2_z2_id_eta12[assoc_uses12[1,2] == 1 && bK2_len[2] > 0 ? y_qrows12[2] : 0];
+    int<lower=0> y3_z2_id_eta12[assoc_uses12[1,3] == 1 && bK2_len[3] > 0 ? y_qrows12[3] : 0];
+
+  //---- data for calculating derivative of eta in GK quadrature
+
+    // fe design matrices
+
+    matrix[assoc_uses12[2,1] == 1 ? y_qrows12[1] : 0, yK[1]] y1_x_eps_12;
+    matrix[assoc_uses12[2,2] == 1 ? y_qrows12[2] : 0, yK[2]] y2_x_eps_12;
+    matrix[assoc_uses12[2,3] == 1 ? y_qrows12[3] : 0, yK[3]] y3_x_eps_12;
+
+    // re design matrices, group factor 1
+
+    vector[assoc_uses12[2,1] == 1 && bK1_len[1] > 0 ? y_qrows12[1] : 0] y1_z1_eps_12[bK1_len[1]];
+    vector[assoc_uses12[2,2] == 1 && bK1_len[2] > 0 ? y_qrows12[2] : 0] y2_z1_eps_12[bK1_len[2]];
+    vector[assoc_uses12[2,3] == 1 && bK1_len[3] > 0 ? y_qrows12[3] : 0] y3_z1_eps_12[bK1_len[3]];
+
+    // re design matrices, group factor 2
+
+    vector[assoc_uses12[2,1] == 1 && bK2_len[1] > 0 ? y_qrows12[1] : 0] y1_z2_eps_12[bK2_len[1]];
+    vector[assoc_uses12[2,2] == 1 && bK2_len[2] > 0 ? y_qrows12[2] : 0] y2_z2_eps_12[bK2_len[2]];
+    vector[assoc_uses12[2,3] == 1 && bK2_len[3] > 0 ? y_qrows12[3] : 0] y3_z2_eps_12[bK2_len[3]];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z1_id_eps_12[assoc_uses12[2,1] == 1 && bK1_len[1] > 0 ? y_qrows12[1] : 0];
+    int<lower=0> y2_z1_id_eps_12[assoc_uses12[2,2] == 1 && bK1_len[2] > 0 ? y_qrows12[2] : 0];
+    int<lower=0> y3_z1_id_eps_12[assoc_uses12[2,3] == 1 && bK1_len[3] > 0 ? y_qrows12[3] : 0];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z2_id_eps_12[assoc_uses12[2,1] == 1 && bK2_len[1] > 0 ? y_qrows12[1] : 0];
+    int<lower=0> y2_z2_id_eps_12[assoc_uses12[2,2] == 1 && bK2_len[2] > 0 ? y_qrows12[2] : 0];
+    int<lower=0> y3_z2_id_eps_12[assoc_uses12[2,3] == 1 && bK2_len[3] > 0 ? y_qrows12[3] : 0];
+
+  //---- data for calculating integral of eta in GK quadrature
+
+    int<lower=0> auc_qnodes12;      // num. of quadnodes for AUC of biomarker trajectory
+    int<lower=0> y_qrows_for_auc12; // num. rows in long. predictor matrix at auc qpts
+    vector[sum(assoc_uses12[3,]) > 0 ? y_qrows_for_auc12 : 0] auc_qwts;
+
+    // fe design matrices
+
+    matrix[assoc_uses12[3,1] == 1 ? y_qrows_for_auc12 : 0, yK[1]] y1_x_auc12;
+    matrix[assoc_uses12[3,2] == 1 ? y_qrows_for_auc12 : 0, yK[2]] y2_x_auc12;
+    matrix[assoc_uses12[3,3] == 1 ? y_qrows_for_auc12 : 0, yK[3]] y3_x_auc12;
+
+    // re design matrices, group factor 1
+
+    vector[assoc_uses12[3,1] == 1 && bK1_len[1] > 0 ? y_qrows_for_auc12 : 0] y1_z1_auc_12[bK1_len[1]];
+    vector[assoc_uses12[3,2] == 1 && bK1_len[2] > 0 ? y_qrows_for_auc12 : 0] y2_z1_auc_12[bK1_len[2]];
+    vector[assoc_uses12[3,3] == 1 && bK1_len[3] > 0 ? y_qrows_for_auc12 : 0] y3_z1_auc_12[bK1_len[3]];
+
+    // re design matrices, group factor 2
+
+    vector[assoc_uses12[3,1] == 1 && bK2_len[1] > 0 ? y_qrows_for_auc12 : 0] y1_z2_auc_12[bK2_len[1]];
+    vector[assoc_uses12[3,2] == 1 && bK2_len[2] > 0 ? y_qrows_for_auc12 : 0] y2_z2_auc_12[bK2_len[2]];
+    vector[assoc_uses12[3,3] == 1 && bK2_len[3] > 0 ? y_qrows_for_auc12 : 0] y3_z2_auc_12[bK2_len[3]];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z1_id_auc_12[assoc_uses12[3,1] == 1 && bK1_len[1] > 0 ? y_qrows_for_auc12 : 0];
+    int<lower=0> y2_z1_id_auc_12[assoc_uses12[3,2] == 1 && bK1_len[2] > 0 ? y_qrows_for_auc12 : 0];
+    int<lower=0> y3_z1_id_auc_12[assoc_uses12[3,3] == 1 && bK1_len[3] > 0 ? y_qrows_for_auc12 : 0];
+
+    // ids for re design matrices, group factor 1
+
+    int<lower=0> y1_z2_id_auc_12[assoc_uses12[3,1] == 1 && bK2_len[1] > 0 ? y_qrows_for_auc12 : 0];
+    int<lower=0> y2_z2_id_auc_12[assoc_uses12[3,2] == 1 && bK2_len[2] > 0 ? y_qrows_for_auc12 : 0];
+    int<lower=0> y3_z2_id_auc_-1[assoc_uses12[3,3] == 1 && bK2_len[3] > 0 ? y_qrows_for_auc12 : 0];
+
+  //---- data for calculating assoc*data interactions in GK quadrature
+
+    // num assoc pars used in {ev/es/mv/ms}*data interactions
+    int<lower=0,upper=a_K> a_K_data12[M*4];
+
+    // design matrix for interacting with ev/es/mv/ms at quadpoints
+    matrix[sum(y_qrows12[1:M]), sum(a_K_data12)] y_x_data12;
+
+    // indexing specifying rows of y_x_data that correspond to each submodel
+    int<lower=0> idx_data12[3,2];
+
+  //---- data for combining lower level units clustered within patients
+
+    int<lower=0,upper=1> has_grp12[M]; // 1 = has clustering below patient level
+    int<lower=0,upper=4> grp_assoc12;  // 1 = sum, 2 = mean, 3 = min, 4 = max
+    int<lower=0> idx_grp12[len_cpts12,2];
+
+  // hyperparameter values are set to 0 if there is no prior
+  // declares:
+  //   e_prior_{mean,scale,df}{_for_intercept,for_aux},
+  //   e_global_prior_{scale,df}
+
+  // coefficients
+  vector[yK[1]] y_prior_mean1;
+  vector[yK[2]] y_prior_mean2;
+  vector[yK[3]] y_prior_mean3;
+  vector<lower=0>[yK[1]] y_prior_scale1;
+  vector<lower=0>[yK[2]] y_prior_scale2;
+  vector<lower=0>[yK[3]] y_prior_scale3;
+  vector<lower=0>[yK[1]] y_prior_df1;
+  vector<lower=0>[yK[2]] y_prior_df2;
+  vector<lower=0>[yK[3]] y_prior_df3;
+  vector<lower=0>[M] y_global_prior_df;    // for hs priors only
+  vector<lower=0>[M] y_global_prior_scale; // for hs priors only
+  vector<lower=0>[M] y_slab_df;            // for hs priors only
+  vector<lower=0>[M] y_slab_scale;         // for hs priors only
+
+  // intercepts
+  vector[M] y_prior_mean_for_intercept;
+  vector<lower=0>[M] y_prior_scale_for_intercept;
+  vector<lower=0>[M] y_prior_df_for_intercept;
+
+  // auxiliary params
+  vector<lower=0>[M] y_prior_mean_for_aux;
+  vector<lower=0>[M] y_prior_scale_for_aux;
+  vector<lower=0>[M] y_prior_df_for_aux;
+
+  // decov prior stuff
+  int<lower=0> len_concentration;
+  int<lower=0> len_regularization;
+  vector<lower=0>[t] b_prior_shape;
+  vector<lower=0>[t] b_prior_scale;
+  real<lower=0> b_prior_concentration[len_concentration];
+  real<lower=0> b_prior_regularization[len_regularization];
+
+  // lkj prior stuff
+  vector<lower=0>[bK1] b1_prior_scale;
+  vector<lower=0>[bK2] b2_prior_scale;
+  vector<lower=0>[bK1] b1_prior_df;
+  vector<lower=0>[bK2] b2_prior_df;
+  real<lower=0> b1_prior_regularization;
+  real<lower=0> b2_prior_regularization;
+
+
+  // hyperparameter values are set to 0 if there is no prior
+  vector[e_K01]                  e_prior_mean01;
+  real                           e_prior_mean_for_intercept01;
+  vector[basehaz_nvars01]          e_prior_mean_for_aux01;
+  vector<lower=0>[e_K01]           e_prior_scale01;
+  real<lower=0>                  e_prior_scale_for_intercept01;
+  vector<lower=0>[basehaz_nvars01] e_prior_scale_for_aux01;
+  vector<lower=0>[e_K01]           e_prior_df01;
+  real<lower=0>                  e_prior_df_for_intercept01;
+  vector<lower=0>[basehaz_nvars01] e_prior_df_for_aux01;
+  real<lower=0>                  e_global_prior_scale01; // for hs priors only
+  real<lower=0>                  e_global_prior_df01;
+  real<lower=0>                  e_slab_df01;
+  real<lower=0>                  e_slab_scale01;
+
+    // hyperparameter values are set to 0 if there is no prior
+  vector[e_K02]                  e_prior_mean02;
+  real                           e_prior_mean_for_intercept02;
+  vector[basehaz_nvars02]          e_prior_mean_for_aux02;
+  vector<lower=0>[e_K02]           e_prior_scale02;
+  real<lower=0>                  e_prior_scale_for_intercept02;
+  vector<lower=0>[basehaz_nvars02] e_prior_scale_for_aux02;
+  vector<lower=0>[e_K02]           e_prior_df02;
+  real<lower=0>                  e_prior_df_for_intercept02;
+  vector<lower=0>[basehaz_nvars02] e_prior_df_for_aux02;
+  real<lower=0>                  e_global_prior_scale02; // for hs priors only
+  real<lower=0>                  e_global_prior_df02;
+  real<lower=0>                  e_slab_df02;
+  real<lower=0>                  e_slab_scale02;
+
+    // hyperparameter values are set to 0 if there is no prior
+  vector[e_K12]                  e_prior_mean12;
+  real                           e_prior_mean_for_intercept12;
+  vector[basehaz_nvars12]          e_prior_mean_for_aux12;
+  vector<lower=0>[e_K12]           e_prior_scale12;
+  real<lower=0>                  e_prior_scale_for_intercept12;
+  vector<lower=0>[basehaz_nvars12] e_prior_scale_for_aux12;
+  vector<lower=0>[e_K12]           e_prior_df12;
+  real<lower=0>                  e_prior_df_for_intercept12;
+  vector<lower=0>[basehaz_nvars12] e_prior_df_for_aux12;
+  real<lower=0>                  e_global_prior_scale12; // for hs priors only
+  real<lower=0>                  e_global_prior_df12;
+  real<lower=0>                  e_slab_df12;
+  real<lower=0>                  e_slab_scale12;
+
+    // declares:
+  //   a_prior_{mean,scale,df},
+  //   a_global_prior_{scale,df}
+
+    // hyperparameter values are set to 0 if there is no prior
+  vector[a_K01]          a_prior_mean01;
+  vector<lower=0>[a_K01] a_prior_scale01;
+  vector<lower=0>[a_K01] a_prior_df01;
+  real<lower=0>        a_global_prior_scale01; // for hs priors only
+  real<lower=0>        a_global_prior_df01;
+  real<lower=0>        a_slab_df01;
+  real<lower=0>        a_slab_scale01;
+
+      // hyperparameter values are set to 0 if there is no prior
+  vector[a_K02]          a_prior_mean02;
+  vector<lower=0>[a_K02] a_prior_scale02;
+  vector<lower=0>[a_K02] a_prior_df02;
+  real<lower=0>        a_global_prior_scale02; // for hs priors only
+  real<lower=0>        a_global_prior_df02;
+  real<lower=0>        a_slab_df02;
+  real<lower=0>        a_slab_scale02;
+
+      // hyperparameter values are set to 0 if there is no prior
+  vector[a_K12]          a_prior_mean12;
+  vector<lower=0>[a_K12] a_prior_scale12;
+  vector<lower=0>[a_K12] a_prior_df12;
+  real<lower=0>        a_global_prior_scale12; // for hs priors only
+  real<lower=0>        a_global_prior_df12;
+  real<lower=0>        a_slab_df12;
+  real<lower=0>        a_slab_scale12;
+
+}
+
+
+transformed data {
+  int<lower=0> e_hs01 = get_nvars_for_hs(e_prior_dist01);
+  int<lower=0> a_hs01 = get_nvars_for_hs(a_prior_dist01);
+  int<lower=0> e_hs02 = get_nvars_for_hs(e_prior_dist02);
+  int<lower=0> a_hs02 = get_nvars_for_hs(a_prior_dist02);
+  int<lower=0> e_hs12 = get_nvars_for_hs(e_prior_dist12);
+  int<lower=0> a_hs12 = get_nvars_for_hs(a_prior_dist12);
+
+  vector[len_epts01] log_epts01  = log(epts01); // log of event times
+  vector[len_epts02] log_epts02  = log(epts02); // log of event times
+  vector[len_epts12] log_epts12  = log(epts12); // log of event times
+
+  vector[len_qpts01] log_qpts01  = log(qpts01); // log of quadrature points
+  vector[len_qpts02] log_qpts02  = log(qpts02); // log of quadrature points
+  vector[len_qpts12] log_qpts12  = log(qpts12); // log of quadrature points
+
+  vector[len_ipts01] log_ipts01  = log(ipts01); // log of qpts for interval censoring
+  vector[len_ipts02] log_ipts02  = log(ipts02); // log of qpts for interval censoring
+  vector[len_ipts12] log_ipts12  = log(ipts12); // log of qpts for interval censoring
+
+  real sum_epts01     = sum(epts01);     // sum of event times
+  real sum_epts02     = sum(epts02);     // sum of event times
+  real sum_epts12     = sum(epts12);     // sum of event times
+
+  real sum_log_epts01 = sum(log_epts01); // sum of log event times
+  real sum_log_epts02 = sum(log_epts02); // sum of log event times
+  real sum_log_epts12 = sum(log_epts12); // sum of log event times
+
+  // declares:
+  //   yHs{1,2,3}
+  //   len_{z_T,var_group,rho}
+  //   pos
+  //   delta
+  //   bCov{1,2}_idx
+  //   {sqrt,log,sum_log}_y{1,2,3}
+  // dimensions for hs priors
+  int<lower=0> yHs1 = get_nvars_for_hs(M > 0 ? y_prior_dist[1] : 0);
+  int<lower=0> yHs2 = get_nvars_for_hs(M > 1 ? y_prior_dist[2] : 0);
+  int<lower=0> yHs3 = get_nvars_for_hs(M > 2 ? y_prior_dist[3] : 0);
+
+  // data for decov prior
+  int<lower=0> len_z_T = 0;
+  int<lower=0> len_var_group = sum(p) * (t > 0);
+  int<lower=0> len_rho = sum(p) - t;
+  int<lower=1> pos = 1;
+  real<lower=0> delta[len_concentration];
+
+  // data for lkj prior
+  int bCov1_idx[prior_dist_for_cov == 2 ? (bK1 + choose(bK1, 2)) : 0];
+  int bCov2_idx[prior_dist_for_cov == 2 ? (bK2 + choose(bK2, 2)) : 0];
+
+  // transformations of data
+  real sum_log_y1 = M > 0 && (family[1] == 2 || family[1] == 3) ?
+    sum(log(yReal1)) : not_a_number();
+  real sum_log_y2 = M > 1 && (family[2] == 2 || family[2] == 3) ?
+    sum(log(yReal2)) : not_a_number();
+  real sum_log_y3 = M > 2 && (family[3] == 2 || family[3] == 3) ?
+    sum(log(yReal3)) : not_a_number();
+  vector[M > 0 && family[1] == 3 ? yNobs[1] : 0] sqrt_y1;
+  vector[M > 1 && family[2] == 3 ? yNobs[2] : 0] sqrt_y2;
+  vector[M > 2 && family[3] == 3 ? yNobs[3] : 0] sqrt_y3;
+  vector[M > 0 && family[1] == 3 ? yNobs[1] : 0] log_y1;
+  vector[M > 1 && family[2] == 3 ? yNobs[2] : 0] log_y2;
+  vector[M > 2 && family[3] == 3 ? yNobs[3] : 0] log_y3;
+  if (M > 0 && family[1] == 3) {
+    sqrt_y1 = sqrt(yReal1);
+    log_y1 = log(yReal1);
+  }
+  if (M > 1 && family[2] == 3) {
+    sqrt_y2 = sqrt(yReal2);
+    log_y2 = log(yReal2);
+  }
+  if (M > 2 && family[3] == 3) {
+    sqrt_y3 = sqrt(yReal3);
+    log_y3 = log(yReal3);
+  }
+
+  // data for decov prior
+  if (prior_dist_for_cov == 1) {
+    for (i in 1:t) {
+      if (p[i] > 1) {
+        for (j in 1:p[i]) {
+          delta[pos] = b_prior_concentration[j];
+          pos += 1;
+        }
+      }
+      for (j in 3:p[i]) len_z_T += p[i] - 1;
+    }
+  }
+
+  // data for lkj prior
+  if (prior_dist_for_cov == 2) {
+    if (bK1 > 0)
+      bCov1_idx = lower_tri_indices(bK1);
+    if (bK2 > 0)
+      bCov2_idx = lower_tri_indices(bK2);
+  }
+
+}
+
+parameters {
+  // declares:
+  //   yGamma{1,2,3}
+  //   z_yBeta{1,2,3}
+  //   z_b
+  //   z_T
+  //   rho
+  //   zeta
+  //   tau
+  //   bSd{1,2}
+  //   z_bMat{1,2}
+  //   bCholesky{1,2}
+  //   yAux{1,2,3}_unscaled
+  //   yGlobal{1,2,3}
+  //   yLocal{1,2,3},
+  //   yOol{1,2,3}
+  //   yMix{1,2,3}
+  // intercepts
+  real<lower=lb(intercept_type[1]),upper=ub(intercept_type[1])>
+    yGamma1[intercept_type[1] > 0];
+  real<lower=lb(intercept_type[2]),upper=ub(intercept_type[2])>
+    yGamma2[intercept_type[2] > 0];
+  real<lower=lb(intercept_type[3]),upper=ub(intercept_type[3])>
+    yGamma3[intercept_type[3] > 0];
+
+  // population level primitive params
+  vector[yK[1]] z_yBeta1;
+  vector[yK[2]] z_yBeta2;
+  vector[yK[3]] z_yBeta3;
+
+  // group level params, decov prior
+  vector[prior_dist_for_cov == 1 ? q : 0] z_b;
+  vector[prior_dist_for_cov == 1 ? len_z_T : 0] z_T;
+  vector<lower=0,upper=1>[prior_dist_for_cov == 1 ? len_rho : 0] rho;
+  vector<lower=0>[prior_dist_for_cov == 1 ? len_concentration : 0] zeta;
+  vector<lower=0>[prior_dist_for_cov == 1 ? t : 0] tau;
+
+  // group level params for first grouping factor
+    // group-level sds
+    vector<lower=0>[prior_dist_for_cov == 2 ? bK1 : 0] bSd1;
+    // unscaled group-level params
+    matrix[prior_dist_for_cov == 2 && bK1 >  0 ? bK1 : 0, bK1 >  0 ? bN1 : 0] z_bMat1;
+    // cholesky factor of corr matrix (if > 1 random effect)
+    cholesky_factor_corr[prior_dist_for_cov == 2 && bK1 > 1 ? bK1 : 0] bCholesky1;
+
+  // group level params for second grouping factor
+    // group-level sds
+    vector<lower=0>[prior_dist_for_cov == 2 ? bK2 : 0] bSd2;
+    // unscaled group-level params
+    matrix[prior_dist_for_cov == 2 && bK2 >  0 ? bK2 : 0, bK2 >  0 ? bN2 : 0] z_bMat2;
+    // cholesky factor of corr matrix (if > 1 random effect)
+    cholesky_factor_corr[prior_dist_for_cov == 2 && bK2 > 1 ? bK2 : 0] bCholesky2;
+
+  // auxiliary params, interpretation depends on family
+  real<lower=0> yAux1_unscaled[has_aux[1]];
+  real<lower=0> yAux2_unscaled[has_aux[2]];
+  real<lower=0> yAux3_unscaled[has_aux[3]];
+
+  // params for priors
+  real<lower=0> yGlobal1[yHs1];
+  real<lower=0> yGlobal2[yHs2];
+  real<lower=0> yGlobal3[yHs3];
+  vector<lower=0>[yK[1]] yLocal1[yHs1];
+  vector<lower=0>[yK[2]] yLocal2[yHs2];
+  vector<lower=0>[yK[3]] yLocal3[yHs3];
+  real<lower=0> y_caux1[yHs1 > 0];
+  real<lower=0> y_caux2[yHs2 > 0];
+  real<lower=0> y_caux3[yHs3 > 0];
+  real<lower=0> yOol1[y_prior_dist[1] == 6]; // one_over_lambda
+  real<lower=0> yOol2[y_prior_dist[2] == 6];
+  real<lower=0> yOol3[y_prior_dist[3] == 6];
+  vector<lower=0>[yK[1]] yMix1[y_prior_dist[1] == 5 || y_prior_dist[1] == 6];
+  vector<lower=0>[yK[2]] yMix2[y_prior_dist[2] == 5 || y_prior_dist[2] == 6];
+  vector<lower=0>[yK[3]] yMix3[y_prior_dist[3] == 5 || y_prior_dist[3] == 6];
+
+
+  // declares:
+  //   e_{gamma,z_beta,aux_unscaled,global,local,mix,ool}
+  // primitive log hazard ratios
+  vector[e_K01] e_z_beta01;
+
+  // intercept
+  real e_gamma01[e_has_intercept01 == 1];
+
+  // unscaled basehaz parameters
+  //   exp model:      nvars = 0, ie. no aux parameter
+  //   weibull model:  nvars = 1, ie. shape parameter
+  //   gompertz model: nvars = 1, ie. scale parameter
+  //   M-spline model: nvars = number of basis terms, ie. spline coefs
+  //   B-spline model: nvars = number of basis terms, ie. spline coefs
+  vector<lower=coefs_lb01(basehaz_type01)>[basehaz_nvars01] e_aux_unscaled01;
+
+  // parameters for priors on log haz ratios
+  real<lower=0> e_global01[e_hs01];
+  vector<lower=0>[(e_hs01>0)*e_K01] e_local[e_hs01];
+  real<lower=0> e_caux01[e_hs01 > 0];
+  vector<lower=0>[e_K01] e_mix01[e_prior_dist01 == 5 || e_prior_dist01 == 6];
+  real<lower=0> e_ool01[e_prior_dist01 == 6];
+
+    // primitive log hazard ratios
+  vector[e_K02] e_z_beta02;
+
+  // intercept
+  real e_gamma02[e_has_intercept02 == 1];
+
+  // unscaled basehaz parameters
+  //   exp model:      nvars = 0, ie. no aux parameter
+  //   weibull model:  nvars = 1, ie. shape parameter
+  //   gompertz model: nvars = 1, ie. scale parameter
+  //   M-spline model: nvars = number of basis terms, ie. spline coefs
+  //   B-spline model: nvars = number of basis terms, ie. spline coefs
+  vector<lower=coefs_lb02(basehaz_type02)>[basehaz_nvars02] e_aux_unscaled02;
+
+  // parameters for priors on log haz ratios
+  real<lower=0> e_global02[e_hs02];
+  vector<lower=0>[(e_hs02>0)*e_K02] e_local[e_hs02];
+  real<lower=0> e_caux02[e_hs02 > 0];
+  vector<lower=0>[e_K02] e_mix02[e_prior_dist02 == 5 || e_prior_dist02 == 6];
+  real<lower=0> e_ool02[e_prior_dist02 == 6];
+
+    // primitive log hazard ratios
+  vector[e_K12] e_z_beta12;
+
+  // intercept
+  real e_gamma12[e_has_intercept12 == 1];
+
+  // unscaled basehaz parameters
+  //   exp model:      nvars = 0, ie. no aux parameter
+  //   weibull model:  nvars = 1, ie. shape parameter
+  //   gompertz model: nvars = 1, ie. scale parameter
+  //   M-spline model: nvars = number of basis terms, ie. spline coefs
+  //   B-spline model: nvars = number of basis terms, ie. spline coefs
+  vector<lower=coefs_lb12(basehaz_type12)>[basehaz_nvars12] e_aux_unscaled12;
+
+  // parameters for priors on log haz ratios
+  real<lower=0> e_global12[e_hs12];
+  vector<lower=0>[(e_hs12>0)*e_K12] e_local[e_hs12];
+  real<lower=0> e_caux12[e_hs12 > 0];
+  vector<lower=0>[e_K12] e_mix12[e_prior_dist12 == 5 || e_prior_dist12 == 6];
+  real<lower=0> e_ool12[e_prior_dist12 == 6];
+
+
+  // declares:
+  //   a_{z_beta,global,local,mix,ool}
+  vector[a_K01] a_z_beta01; // primitive assoc params
+
+  // parameters for priors on assoc params
+  real<lower=0> a_global01[a_hs01];
+  vector<lower=0>[(a_hs01>0)*a_K01] a_local01[a_hs01];
+  real<lower=0> a_caux01[a_hs01 > 0];
+  vector<lower=0>[a_K01] a_mix01[a_prior_dist01 == 5 || a_prior_dist01 == 6];
+  real<lower=0> a_ool01[a_prior_dist01 == 6];
+
+    //   a_{z_beta,global,local,mix,ool}
+  vector[a_K02] a_z_beta02; // primitive assoc params
+
+  // parameters for priors on assoc params
+  real<lower=0> a_global02[a_hs02];
+  vector<lower=0>[(a_hs02>0)*a_K02] a_local02[a_hs02];
+  real<lower=0> a_caux02[a_hs02 > 0];
+  vector<lower=0>[a_K02] a_mix02[a_prior_dist02 == 5 || a_prior_dist02 == 6];
+  real<lower=0> a_ool02[a_prior_dist02 == 6];
+
+    //   a_{z_beta,global,local,mix,ool}
+  vector[a_K12] a_z_beta12; // primitive assoc params
+
+  // parameters for priors on assoc params
+  real<lower=0> a_global12[a_hs12];
+  vector<lower=0>[(a_hs12>0)*a_K12] a_local12[a_hs12];
+  real<lower=0> a_caux12[a_hs12 > 0];
+  vector<lower=0>[a_K12] a_mix12[a_prior_dist12 == 5 || a_prior_dist12 == 6];
+  real<lower=0> a_ool12[a_prior_dist12 == 6];
+
+}
+
+transformed parameters {
+  vector[e_K01] e_beta01;               // log hazard ratios
+  vector[e_K02] e_beta02;               // log hazard ratios
+  vector[e_K12] e_beta12;               // log hazard ratios
+
+  vector[a_K01] a_beta01;               // assoc params
+  vector[a_K02] a_beta02;               // assoc params
+  vector[a_K12] a_beta12;               // assoc params
+
+  vector[basehaz_nvars01] e_aux01;      // basehaz params
+  vector[basehaz_nvars02] e_aux02;      // basehaz params
+  vector[basehaz_nvars12] e_aux12;      // basehaz params
+
+  //---- Parameters for longitudinal submodels
+
+  // declares and defines:
+  //   yBeta{1,2,3}
+  //   yAux{1,2,3}
+  //   yAuxMaximum,
+  //   theta_L
+  //   bMat{1,2}
+    vector[yK[1]] yBeta1; // population level params
+  vector[yK[2]] yBeta2;
+  vector[yK[3]] yBeta3;
+  real yAux1[has_aux[1]]; // auxiliary params
+  real yAux2[has_aux[2]];
+  real yAux3[has_aux[3]];
+  vector[len_theta_L] theta_L; // cov matrix for decov prior
+  real yAuxMaximum = 1.0; // used for scaling in theta_L
+
+  // group level params
+  matrix[bK1 >  0 ? bN1 : 0, bK1] bMat1; // for grouping factor 1
+  matrix[bK2 >  0 ? bN2 : 0, bK2] bMat2; // for grouping factor 2
+
+  // population level params, auxiliary params
+  if (has_aux[1] == 1) {
+    yAux1[1] = make_aux(yAux1_unscaled[1], y_prior_dist_for_aux[1],
+                        y_prior_mean_for_aux[1], y_prior_scale_for_aux[1]);
+    if (yAux1[1] > yAuxMaximum)
+      yAuxMaximum = yAux1[1];
+  }
+
+  if (yK[1] > 0)
+    yBeta1 = make_beta(z_yBeta1, y_prior_dist[1], y_prior_mean1,
+                       y_prior_scale1, y_prior_df1, y_global_prior_scale[1],
+                       yGlobal1, yLocal1, yOol1, yMix1, yAux1, family[1],
+                       y_slab_scale[1], y_caux1);
+  if (M > 1) {
+    if (has_aux[2] == 1) {
+      yAux2[1] = make_aux(yAux2_unscaled[1], y_prior_dist_for_aux[2],
+                          y_prior_mean_for_aux[2], y_prior_scale_for_aux[2]);
+      if (yAux2[1] > yAuxMaximum)
+        yAuxMaximum = yAux2[1];
+    }
+    if (yK[2] > 0)
+      yBeta2 = make_beta(z_yBeta2, y_prior_dist[2], y_prior_mean2,
+                         y_prior_scale2, y_prior_df2, y_global_prior_scale[2],
+                         yGlobal2, yLocal2, yOol2, yMix2, yAux2, family[2],
+                         y_slab_scale[2], y_caux2);
+  }
+  if (M > 2) {
+    if (has_aux[3] == 1) {
+      yAux3[1] = make_aux(yAux3_unscaled[1], y_prior_dist_for_aux[3],
+                          y_prior_mean_for_aux[3], y_prior_scale_for_aux[3]);
+      if (yAux3[1] > yAuxMaximum)
+        yAuxMaximum = yAux3[1];
+    }
+    if (yK[3] > 0)
+      yBeta3 = make_beta(z_yBeta3, y_prior_dist[3], y_prior_mean3,
+                         y_prior_scale3, y_prior_df3, y_global_prior_scale[3],
+                         yGlobal3, yLocal3, yOol3, yMix3, yAux3, family[3],
+                         y_slab_scale[3], y_caux3);
+  }
+
+  // group level params, under decov prior
+  if (prior_dist_for_cov == 1) {
+    int mark = 1;
+    // cov matrix
+    theta_L = make_theta_L(len_theta_L, p, yAuxMaximum, tau,
+                           b_prior_scale, zeta, rho, z_T);
+    // group-level params for first grouping factor
+    if (bK1 > 0)
+      bMat1 = make_b_matrix(z_b, theta_L, p, l, 1);
+    // group level params for second grouping factor
+    if (bK2 > 0)
+      bMat2 = make_b_matrix(z_b, theta_L, p, l, 2);
+  }
+
+  // group-level params, under lkj prior
+  else if (prior_dist_for_cov == 2) {
+    // group-level params for first grouping factor
+    if (bK1 == 1)
+      bMat1 = (bSd1[1] * z_bMat1)';
+    else if (bK1 > 1)
+      bMat1 = (diag_pre_multiply(bSd1, bCholesky1) * z_bMat1)';
+    // group level params for second grouping factor
+    if (bK2 == 1)
+      bMat2 = (bSd2[1] * z_bMat2)';
+    else if (bK2 > 1)
+      bMat2 = (diag_pre_multiply(bSd2, bCholesky2) * z_bMat2)';
+  }
+
+
+  //---- Parameters for event submodel
+  e_beta01 = make_beta(e_z_beta01, e_prior_dist01, e_prior_mean01,
+                     e_prior_scale01, e_prior_df01, e_global_prior_scale01,
+                     e_global01, e_local01, e_ool01, e_mix01, rep_array(1.0, 0), 0,
+                     e_slab_scale01, e_caux01);
+e_beta02 = make_beta(e_z_beta02, e_prior_dist02, e_prior_mean02,
+                     e_prior_scale02, e_prior_df02, e_global_prior_scale02,
+                     e_global02, e_local02, e_ool02, e_mix02, rep_array(1.0, 0), 0,
+                     e_slab_scale02, e_caux02);
+
+e_beta12 = make_beta(e_z_beta12, e_prior_dist12, e_prior_mean12,
+                     e_prior_scale12, e_prior_df12, e_global_prior_scale12,
+                     e_global12, e_local12, e_ool12, e_mix12, rep_array(1.0, 0), 0,
+                     e_slab_scale12, e_caux12);
+
+
+  a_beta01 = make_beta(a_z_beta01, a_prior_dist01, a_prior_mean01,
+                     a_prior_scale01, a_prior_df01, a_global_prior_scale01,
+                     a_global01, a_local01, a_ool01, a_mix01, rep_array(1.0, 0), 0,
+                     a_slab_scale01, a_caux01);
+    a_beta02 = make_beta(a_z_beta02, a_prior_dist02, a_prior_mean02,
+                     a_prior_scale02, a_prior_df02, a_global_prior_scale02,
+                     a_global02, a_local02, a_ool02, a_mix02, rep_array(1.0, 0), 0,
+                     a_slab_scale02, a_caux02);
+      a_beta12 = make_beta(a_z_beta12, a_prior_dist12, a_prior_mean12,
+                     a_prior_scale12, a_prior_df12, a_global_prior_scale12,
+                     a_global12, a_local12, a_ool12, a_mix12, rep_array(1.0, 0), 0,
+                     a_slab_scale12, a_caux12);
+
+  e_aux01  = make_basehaz_coef(e_aux_unscaled01, e_prior_dist_for_aux01,
+                             e_prior_mean_for_aux01, e_prior_scale_for_aux01);
+  e_aux02  = make_basehaz_coef(e_aux_unscaled02, e_prior_dist_for_aux02,
+          e_prior_mean_for_aux02, e_prior_scale_for_aux02);
+  e_aux12  = make_basehaz_coef(e_aux_unscaled12, e_prior_dist_for_aux12,
+                             e_prior_mean_for_aux12, e_prior_scale_for_aux12);
+}
+
+
+model {
+
+  //---- Log likelihoods for longitudinal submodels
+#include /model/mvmer_lp.stan
+
+  //---- Log likelihood for event submodel (GK quadrature)
+  {
+    vector[len_cpts01] e_eta01;
+    vector[len_cpts02] e_eta02;
+    vector[len_cpts12] e_eta12;
+
+    // Event submodel: linear predictor at event and quad times
+    if (e_K01 > 0) e_eta01 = e_x01 * e_beta01;
+    else         e_eta01 = rep_vector(0.0, len_cpts01);
+
+    if (e_K01 > 0) e_eta02 = e_x02 * e_beta02;
+    else         e_eta02 = rep_vector(0.0, len_cpts02);
+
+    if (e_K01 > 0) e_eta12 = e_x12 * e_beta12;
+    else         e_eta12 = rep_vector(0.0, len_cpts12);
+
+
+    if (e_has_intercept01 == 1) e_eta01 = e_eta01 + e_gamma01[1];
+    if (e_has_intercept02 == 1) e_eta02 = e_eta02 + e_gamma02[1];
+    if (e_has_intercept12 == 1) e_eta12 = e_eta12 + e_gamma12[1];
+
+    if (assoc01 == 1) {
+      // declares:
+      //   y_eta_q{_eps,_lag,_auc}
+      //   y_eta_qwide{_eps,_lag,_auc}
+      //   y_q_wide{_eps,_lag,_auc}
+      //   mark{2,3}
+          // !!! be careful that indexing of has_assoc matches stan_jm.fit !!!
+
+    // mark tracks indexing within a_beta vector, which is the
+    // vector of association parameters
+    int mark = 0;
+
+    // mark2 tracks indexing within a_K_data vector, which is the
+    // vector specifying the number of columns used for each possible
+    // type of association term by data interaction
+    int mark2 = 0;
+
+    // mark3 tracks indexing within size_which_interactions vector
+    int mark3 = 0;
+
+    for (m in 1:M) {
+
+      //----- etavalue and any interactions
+
+      mark2 += 1;
+      if (has_assoc01[1,m]  == 1 || // etavalue
+          has_assoc01[9,m]  == 1 || // etavalue * data
+          has_assoc01[13,m] == 1 || // etavalue * etavalue
+          has_assoc01[14,m] == 1) { // etavalue * muvalue
+
+        // declare and define eta for longitudinal submodel m
+#include /model/make_eta_tmp.stan
+
+        // add etavalue and any interactions to event submodel eta
+        if (has_assoc[1,m] == 1) { // etavalue
+          vector[y_qrows[m]] val;
+          if (has_grp[m] == 0) {
+            val = eta_tmp;
+          }
+          else {
+            val = collapse_within_groups(eta_tmp, idx_grp, grp_assoc);
+          }
+          mark += 1;
+          e_eta += a_beta[mark] * (val - a_xbar[mark]);
+        }
+        mark2 += 1; // count even if assoc type isn't used
+        if (has_assoc[9,m] == 1) { // etavalue*data
+          int idx1 = idx_data[m,1];
+          int idx2 = idx_data[m,2];
+          int J = a_K_data[mark2];
+          int j_shift = (mark2 == 1) ? 0 : sum(a_K_data[1:(mark2-1)]);
+          for (j in 1:J) {
+            vector[y_qrows[m]] val;
+            int sel = j_shift + j;
+            if (has_grp[m] == 0) {
+              val = eta_tmp .* y_x_data[idx1:idx2, sel];
+            }
+            else {
+              val = collapse_within_groups(
+                eta_tmp .* y_x_data[idx1:idx2, sel],
+                idx_grp, grp_assoc);
+            }
+            mark += 1;
+            e_eta += a_beta[mark] * (val - a_xbar[mark]);
+          }
+        }
+        mark3 += 1; // count even if assoc type isn't used
+        if (has_assoc[13,m] == 1) { // etavalue*etavalue
+          for (j in 1:size_which_interactions[mark3]) {
+            int j_shift = (mark3 == 1) ? 0 : sum(size_which_interactions[1:(mark3-1)]);
+            int sel = which_interactions[j+j_shift];
+            vector[y_qrows[m]] val;
+#include /model/make_eta_tmp2.stan
+            val = eta_tmp .* eta_tmp2;
+            mark += 1;
+            e_eta += a_beta[mark] * (val - a_xbar[mark]);
+          }
+        }
+        mark3 += 1; // count even if assoc type isn't used
+        if (has_assoc[14,m] == 1) { // etavalue*muvalue
+          for (j in 1:size_which_interactions[mark3]) {
+            int j_shift = (mark3 == 1) ? 0 : sum(size_which_interactions[1:(mark3-1)]);
+            int sel = which_interactions[j+j_shift];
+            vector[y_qrows[m]] val;
+            vector[y_qrows[sel]] mu_tmp2;
+#include /model/make_eta_tmp2.stan
+            mu_tmp2 = evaluate_mu(eta_tmp2, family[sel], link[sel]);
+            val = eta_tmp .* mu_tmp2;
+            mark += 1;
+            e_eta += a_beta[mark] * (val - a_xbar[mark]);
+          }
+        }
+      }
+      else {
+        mark3 += 2;
+      }
+
+      //----- etaslope and any interactions
+
+      mark2 += 1;
+      if ((has_assoc[2,m] == 1) || (has_assoc[10,m] == 1)) {
+
+        // declare and define etaslope at quadpoints for submodel m
+        vector[y_qrows[m]] dydt_eta_q;
+        if (m == 1) {
+          int bMat1_colshift = 0;
+          int bMat2_colshift = 0;
+          dydt_eta_q = evaluate_eta(y1_x_eps,
+                                    y1_z1_eps,
+                                    y1_z2_eps,
+                                    y1_z1_id_eps,
+                                    y1_z2_id_eps,
+                                    yGamma1,
+                                    yBeta1,
+                                    bMat1,
+                                    bMat2,
+                                    bMat1_colshift,
+                                    bMat2_colshift,
+                                    0);
+        }
+        else if (m == 2) {
+          int bMat1_colshift = bK1_len[1];
+          int bMat2_colshift = bK2_len[1];
+          dydt_eta_q = evaluate_eta(y2_x_eps,
+                                    y2_z1_eps,
+                                    y2_z2_eps,
+                                    y2_z1_id_eps,
+                                    y2_z2_id_eps,
+                                    yGamma2,
+                                    yBeta2,
+                                    bMat1,
+                                    bMat2,
+                                    bMat1_colshift,
+                                    bMat2_colshift,
+                                    0);
+        }
+        else if (m == 3) {
+          int bMat1_colshift = sum(bK1_len[1:2]);
+          int bMat2_colshift = sum(bK2_len[1:2]);
+          dydt_eta_q = evaluate_eta(y3_x_eps,
+                                    y3_z1_eps,
+                                    y3_z2_eps,
+                                    y3_z1_id_eps,
+                                    y3_z2_id_eps,
+                                    yGamma3,
+                                    yBeta3,
+                                    bMat1,
+                                    bMat2,
+                                    bMat1_colshift,
+                                    bMat2_colshift,
+                                    0);
+        }
+
+        // add etaslope and any interactions to event submodel eta
+        if (has_assoc[2,m] == 1) { // etaslope
+          vector[y_qrows[m]] val;
+          if (has_grp[m] == 0) {
+            val = dydt_eta_q;
+          }
+          else {
+            val = collapse_within_groups(dydt_eta_q, idx_grp, grp_assoc);
+          }
+          mark += 1;
+          e_eta = e_eta + a_beta[mark] * (val - a_xbar[mark]);
+        }
+        if (has_assoc[10,m] == 1) { // etaslope*data
+          int idx1 = idx_data[m,1];
+          int idx2 = idx_data[m,2];
+          int J = a_K_data[mark2];
+          int j_shift = (mark2 == 1) ? 0 : sum(a_K_data[1:(mark2-1)]);
+          for (j in 1:J) {
+            vector[y_qrows[m]] val;
+            int sel = j_shift + j;
+            if (has_grp[m] == 0) {
+              val = dydt_eta_q .* y_x_data[idx1:idx2, sel];
+            }
+            else {
+              val = collapse_within_groups(dydt_eta_q .* y_x_data[idx1:idx2, sel],
+                                           idx_grp, grp_assoc);
+            }
+            mark += 1;
+            e_eta = e_eta + a_beta[mark] * (val - a_xbar[mark]);
+          }
+        }
+      }
+
+      //----- etaauc
+
+      if (has_assoc[3,m] == 1) { // etaauc
+        vector[y_qrows_for_auc] eta_auc_tmp; // eta at all auc qpts (for submodel m)
+        vector[y_qrows[m]] val;              // eta following summation over auc qpts
+        if (m == 1) {
+          int bMat1_colshift = 0;
+          int bMat2_colshift = 0;
+          eta_auc_tmp = evaluate_eta(y1_x_auc,
+                                     y1_z1_auc,
+                                     y1_z2_auc,
+                                     y1_z1_id_auc,
+                                     y1_z2_id_auc,
+                                     yGamma1,
+                                     yBeta1,
+                                     bMat1,
+                                     bMat2,
+                                     bMat1_colshift,
+                                     bMat2_colshift,
+                                     intercept_type[1]);
+        }
+        else if (m == 2) {
+          int bMat1_colshift = bK1_len[1];
+          int bMat2_colshift = bK2_len[1];
+          eta_auc_tmp = evaluate_eta(y2_x_auc,
+                                     y2_z1_auc,
+                                     y2_z2_auc,
+                                     y2_z1_id_auc,
+                                     y2_z2_id_auc,
+                                     yGamma2,
+                                     yBeta2,
+                                     bMat1,
+                                     bMat2,
+                                     bMat1_colshift,
+                                     bMat2_colshift,
+                                     intercept_type[2]);
+        }
+        else if (m == 3) {
+          int bMat1_colshift = sum(bK1_len[1:2]);
+          int bMat2_colshift = sum(bK2_len[1:2]);
+          eta_auc_tmp = evaluate_eta(y3_x_auc,
+                                     y3_z1_auc,
+                                     y3_z2_auc,
+                                     y3_z1_id_auc,
+                                     y3_z2_id_auc,
+                                     yGamma3,
+                                     yBeta3,
+                                     bMat1,
+                                     bMat2,
+                                     bMat1_colshift,
+                                     bMat2_colshift,
+                                     intercept_type[3]);
+        }
+        mark += 1;
+        for (r in 1:y_qrows[m]) {
+          vector[auc_qnodes] val_tmp;
+          vector[auc_qnodes] wgt_tmp;
+          val_tmp = eta_auc_tmp[((r-1) * auc_qnodes + 1):(r * auc_qnodes)];
+          wgt_tmp = auc_qwts   [((r-1) * auc_qnodes + 1):(r * auc_qnodes)];
+          val[r] = sum(wgt_tmp .* val_tmp);
+        }
+        e_eta += a_beta[mark] * (val - a_xbar[mark]);
+      }
+
+      //----- muvalue and any interactions
+
+      mark2 += 1;
+      if (has_assoc[4,m]  == 1 || // muvalue
+          has_assoc[11,m] == 1 || // muvalue * data
+          has_assoc[15,m] == 1 || // muvalue * etavalue
+          has_assoc[16,m] == 1) { // muvalue * muvalue
+
+        // declare and define mu for submodel m
+        vector[y_qrows[m]] mu_tmp;
+#include /model/make_eta_tmp.stan
+        mu_tmp = evaluate_mu(eta_tmp, family[m], link[m]);
+
+        // add muvalue and any interactions to event submodel eta
+        if (has_assoc[4,m] == 1) { // muvalue
+          vector[y_qrows[m]] val;
+          if (has_grp[m] == 0) {
+            val = mu_tmp;
+          }
+          else {
+            val = collapse_within_groups(mu_tmp, idx_grp, grp_assoc);
+          }
+          mark += 1;
+          e_eta = e_eta + a_beta[mark] * (val - a_xbar[mark]);
+        }
+        if (has_assoc[11,m] == 1) { // muvalue*data
+          int tmp = a_K_data[mark2];
+          int j_shift = (mark2 == 1) ? 0 : sum(a_K_data[1:(mark2-1)]);
+          for (j in 1:tmp) {
+            vector[y_qrows[m]] val;
+            int sel = j_shift + j;
+            if (has_grp[m] == 0) {
+              val = mu_tmp .* y_x_data[idx_data[m,1]:idx_data[m,2], sel];
+            }
+            else {
+              val = collapse_within_groups(
+                mu_tmp .* y_x_data[idx_data[m,1]:idx_data[m,2], sel],
+                idx_grp, grp_assoc);
+            }
+            mark += 1;
+            e_eta = e_eta + a_beta[mark] * (val - a_xbar[mark]);
+          }
+        }
+        mark3 += 1; // count even if assoc type isn't used
+        if (has_assoc[15,m] == 1) { // muvalue*etavalue
+          for (j in 1:size_which_interactions[mark3]) {
+            int j_shift = (mark3 == 1) ? 0 : sum(size_which_interactions[1:(mark3-1)]);
+            int sel = which_interactions[j+j_shift];
+            vector[y_qrows[m]] val;
+#include /model/make_eta_tmp2.stan
+            val = mu_tmp .* eta_tmp2;
+            mark += 1;
+            e_eta = e_eta + a_beta[mark] * (val - a_xbar[mark]);
+          }
+        }
+        mark3 += 1; // count even if assoc type isn't used
+        if (has_assoc[16,m] == 1) { // muvalue*muvalue
+          for (j in 1:size_which_interactions[mark3]) {
+            int j_shift = (mark3 == 1) ? 0 : sum(size_which_interactions[1:(mark3-1)]);
+            int sel = which_interactions[j+j_shift];
+            vector[y_qrows[m]] val;
+            vector[y_qrows[sel]] mu_tmp2;
+#include /model/make_eta_tmp2.stan
+            mu_tmp2 = evaluate_mu(eta_tmp2, family[sel], link[sel]);
+            val = mu_tmp .* mu_tmp2;
+            mark += 1;
+            e_eta = e_eta + a_beta[mark] * (val - a_xbar[mark]);
+          }
+        }
+      }
+      else {
+        mark3 += 2;
+      }
+
+      //----- muslope and any interactions
+
+      mark2 += 1;
+      if (has_assoc[5,m] == 1 || has_assoc[12,m] == 1) {
+        reject("muslope association structure has been removed.")
+      }
+
+      //----- muauc
+
+      // add muauc to event submodel eta
+      if (has_assoc[6,m] == 1) { // muauc
+        vector[y_qrows_for_auc] eta_auc_tmp; // eta at all auc qpts (for submodel m)
+        vector[y_qrows_for_auc] mu_auc_tmp;  // mu  at all auc qpts (for submodel m)
+        vector[y_qrows[m]] val;         // mu  following summation over auc qpts
+        if (m == 1) {
+          int bMat1_colshift = 0;
+          int bMat2_colshift = 0;
+          eta_auc_tmp = evaluate_eta(y1_x_auc,
+                                     y1_z1_auc,
+                                     y1_z2_auc,
+                                     y1_z1_id_auc,
+                                     y1_z2_id_auc,
+                                     yGamma1,
+                                     yBeta1,
+                                     bMat1,
+                                     bMat2,
+                                     bMat1_colshift,
+                                     bMat2_colshift,
+                                     intercept_type[1]);
+        }
+        else if (m == 2) {
+          int bMat1_colshift = bK1_len[1];
+          int bMat2_colshift = bK2_len[1];
+          eta_auc_tmp = evaluate_eta(y2_x_auc,
+                                     y2_z1_auc,
+                                     y2_z2_auc,
+                                     y2_z1_id_auc,
+                                     y2_z2_id_auc,
+                                     yGamma2,
+                                     yBeta2,
+                                     bMat1,
+                                     bMat2,
+                                     bMat1_colshift,
+                                     bMat2_colshift,
+                                     intercept_type[2]);
+        }
+        else if (m == 3) {
+          int bMat1_colshift = sum(bK1_len[1:2]);
+          int bMat2_colshift = sum(bK2_len[1:2]);
+          eta_auc_tmp = evaluate_eta(y3_x_auc,
+                                     y3_z1_auc,
+                                     y3_z2_auc,
+                                     y3_z1_id_auc,
+                                     y3_z2_id_auc,
+                                     yGamma3,
+                                     yBeta3,
+                                     bMat1,
+                                     bMat2,
+                                     bMat1_colshift,
+                                     bMat2_colshift,
+                                     intercept_type[3]);
+        }
+        mu_auc_tmp = evaluate_mu(eta_auc_tmp, family[m], link[m]);
+        mark += 1;
+        for (r in 1:y_qrows[m]) {
+          vector[auc_qnodes] val_tmp;
+          vector[auc_qnodes] wgt_tmp;
+          val_tmp = mu_auc_tmp[((r-1) * auc_qnodes + 1):(r * auc_qnodes)];
+          wgt_tmp = auc_qwts  [((r-1) * auc_qnodes + 1):(r * auc_qnodes)];
+          val[r] = sum(wgt_tmp .* val_tmp);
+        }
+        e_eta += a_beta[mark] * (val - a_xbar[mark]);
+      }
+
+    }
+
+    //-----  shared random effects
+
+    if (sum_size_which_b > 0) {
+      reject("shared_b has been removed.")
+    }
+    if (sum_size_which_coef > 0) {
+      reject("shared_coef has been removed.")
+    }
 
 
 
+
+    }
+
+    {
+    // declares (and increments target with event log-lik):
+    //   log_basehaz,
+    //   log_{haz_q,haz_etimes,surv_etimes,event}
+#include /model/event_lp.stan
+    }
+  }
+
+  //---- Log priors
+  // increments target with mvmer priors
+#include /model/priors_mvmer.stan
+
+    beta_lp(e_z_beta,
+            e_prior_dist,
+            e_prior_scale,
+            e_prior_df,
+            e_global_prior_df,
+            e_local,
+            e_global,
+            e_mix,
+            e_ool,
+            e_slab_df,
+            e_caux);
+
+    beta_lp(a_z_beta,
+            a_prior_dist,
+            a_prior_scale,
+            a_prior_df,
+            a_global_prior_df,
+            a_local,
+            a_global,
+            a_mix,
+            a_ool,
+            a_slab_df,
+            a_caux);
+
+    basehaz_lp(e_aux_unscaled,
+               e_prior_dist_for_aux,
+               e_prior_df_for_aux);
+
+    if (e_has_intercept == 1)
+        gamma_lp(e_gamma[1],
+                 e_prior_dist_for_intercept,
+                 e_prior_mean_for_intercept,
+                 e_prior_scale_for_intercept,
+                 e_prior_df_for_intercept);
 }

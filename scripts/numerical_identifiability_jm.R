@@ -58,7 +58,7 @@ init = "prefit"
 
 
 
-init_fit = msjm_stan(formulaLong = formulaLong,
+standata = msjm_stan(formulaLong = formulaLong,
                   dataLong = dataLong,
                   formulaMs = formulaMs,
                   dataMs = dataMs,
