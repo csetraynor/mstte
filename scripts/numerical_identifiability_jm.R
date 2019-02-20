@@ -1,8 +1,8 @@
 library(simms)
-library(rstanarm, lib.loc = "~/R-dev/")
-
+# library(rstanarm, lib.loc = "~/R-dev/")
+library(rstanarm)
 set.seed(9911)
-sim1 = simms::sim_idm_jm(n = 200)
+sim1 = simms::sim_idm_jm(n = 500)
 
 tmat_mst <- mstate::trans.illdeath(names=c("diagnosis","relapse","death"))
 sim1$Mstate = mstate::msprep(time=c(NA,"df_time","os_time"),

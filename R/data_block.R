@@ -2547,8 +2547,8 @@ handle_assocmod2 <- function(data, assoc, y_mod, e_mod, grp_stuff, meta, j) {
                grp_stuff    = grp_stuff,
                meta         = meta,
                assoc        = assoc,
-               ids          = e_mod$cids,
-               times        = e_mod$cpts,
+               ids          = time_state$ids,
+               times        = time_state$times,
                j            = j)
 
   do.call(make_assoc_parts2, args)

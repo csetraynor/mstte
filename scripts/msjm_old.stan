@@ -2865,7 +2865,7 @@ transformed parameters {
   //   yAuxMaximum,
   //   theta_L
   //   bMat{1,2}
-    vector[yK[1]] yBeta1; // population level params
+  vector[yK[1]] yBeta1; // population level params
   vector[yK[2]] yBeta2;
   vector[yK[3]] yBeta3;
   real yAux1[has_aux[1]]; // auxiliary params
@@ -3042,60 +3042,109 @@ model {
           has_assoc01[14,m] == 1) { // etavalue * muvalue
 
         // declare and define eta for longitudinal submodel m
-#include /model/make_eta_tmp.stan
+        vector[y_qrows[m]] eta_tmp;
+        if (m == 1) {
+          int bMat1_colshift = 0;
+          int bMat2_colshift = 0;
+          eta_tmp = evaluate_eta(y1_x_eta01,
+                                 y1_z1_eta01,
+                                 y1_z2_eta01,
+                                 y1_z1_id_eta01,
+                                 y1_z2_id_eta01,
+                                 yGamma1,
+                                 yBeta1,
+                                 bMat1,
+                                 bMat2,
+                                 bMat1_colshift,
+                                 bMat2_colshift,
+                                 intercept_type[1]);
+        }
+        else if (m == 2) {
+          int bMat1_colshift = bK1_len[1];
+          int bMat2_colshift = bK2_len[1];
+          eta_tmp = evaluate_eta(y2_x_eta,
+                                 y2_z1_eta,
+                                 y2_z2_eta,
+                                 y2_z1_id_eta,
+                                 y2_z2_id_eta,
+                                 yGamma2,
+                                 yBeta2,
+                                 bMat1,
+                                 bMat2,
+                                 bMat1_colshift,
+                                 bMat2_colshift,
+                                 intercept_type[2]);
+        }
+        else if (m == 3) {
+          int bMat1_colshift = sum(bK1_len[1:2]);
+          int bMat2_colshift = sum(bK2_len[1:2]);
+          eta_tmp = evaluate_eta(y3_x_eta,
+                                 y3_z1_eta,
+                                 y3_z2_eta,
+                                 y3_z1_id_eta,
+                                 y3_z2_id_eta,
+                                 yGamma3,
+                                 yBeta3,
+                                 bMat1,
+                                 bMat2,
+                                 bMat1_colshift,
+                                 bMat2_colshift,
+                                 intercept_type[3]);
+        }
+
 
         // add etavalue and any interactions to event submodel eta
-        if (has_assoc[1,m] == 1) { // etavalue
-          vector[y_qrows[m]] val;
+        if (has_assoc01[1,m] == 1) { // etavalue
+          vector[y_qrows01[m]] val;
           if (has_grp[m] == 0) {
             val = eta_tmp;
           }
           else {
-            val = collapse_within_groups(eta_tmp, idx_grp, grp_assoc);
+            val = collapse_within_groups(eta_tmp, idx_grp, grp_assoc01);
           }
           mark += 1;
           e_eta += a_beta[mark] * (val - a_xbar[mark]);
         }
-        mark2 += 1; // count even if assoc type isn't used
-        if (has_assoc[9,m] == 1) { // etavalue*data
+        mark2 += 1; // count even if assoc01 type isn't used
+        if (has_assoc01[9,m] == 1) { // etavalue*data
           int idx1 = idx_data[m,1];
           int idx2 = idx_data[m,2];
           int J = a_K_data[mark2];
           int j_shift = (mark2 == 1) ? 0 : sum(a_K_data[1:(mark2-1)]);
           for (j in 1:J) {
-            vector[y_qrows[m]] val;
+            vector[y_qrows01[m]] val;
             int sel = j_shift + j;
             if (has_grp[m] == 0) {
-              val = eta_tmp .* y_x_data[idx1:idx2, sel];
+              val = eta_tmp .* y_x_data01[idx1:idx2, sel];
             }
             else {
               val = collapse_within_groups(
-                eta_tmp .* y_x_data[idx1:idx2, sel],
-                idx_grp, grp_assoc);
+                eta_tmp .* y_x_data01[idx1:idx2, sel],
+                idx_grp, grp_assoc01);
             }
             mark += 1;
             e_eta += a_beta[mark] * (val - a_xbar[mark]);
           }
         }
-        mark3 += 1; // count even if assoc type isn't used
-        if (has_assoc[13,m] == 1) { // etavalue*etavalue
+        mark3 += 1; // count even if assoc01 type isn't used
+        if (has_assoc01[13,m] == 1) { // etavalue*etavalue
           for (j in 1:size_which_interactions[mark3]) {
             int j_shift = (mark3 == 1) ? 0 : sum(size_which_interactions[1:(mark3-1)]);
             int sel = which_interactions[j+j_shift];
-            vector[y_qrows[m]] val;
+            vector[y_qrows01[m]] val;
 #include /model/make_eta_tmp2.stan
             val = eta_tmp .* eta_tmp2;
             mark += 1;
             e_eta += a_beta[mark] * (val - a_xbar[mark]);
           }
         }
-        mark3 += 1; // count even if assoc type isn't used
-        if (has_assoc[14,m] == 1) { // etavalue*muvalue
+        mark3 += 1; // count even if assoc01 type isn't used
+        if (has_assoc01[14,m] == 1) { // etavalue*muvalue
           for (j in 1:size_which_interactions[mark3]) {
             int j_shift = (mark3 == 1) ? 0 : sum(size_which_interactions[1:(mark3-1)]);
             int sel = which_interactions[j+j_shift];
-            vector[y_qrows[m]] val;
-            vector[y_qrows[sel]] mu_tmp2;
+            vector[y_qrows01[m]] val;
+            vector[y_qrows01[sel]] mu_tmp2;
 #include /model/make_eta_tmp2.stan
             mu_tmp2 = evaluate_mu(eta_tmp2, family[sel], link[sel]);
             val = eta_tmp .* mu_tmp2;
@@ -3111,10 +3160,10 @@ model {
       //----- etaslope and any interactions
 
       mark2 += 1;
-      if ((has_assoc[2,m] == 1) || (has_assoc[10,m] == 1)) {
+      if ((has_assoc01[2,m] == 1) || (has_assoc01[10,m] == 1)) {
 
         // declare and define etaslope at quadpoints for submodel m
-        vector[y_qrows[m]] dydt_eta_q;
+        vector[y_qrows01[m]] dydt_eta_q;
         if (m == 1) {
           int bMat1_colshift = 0;
           int bMat2_colshift = 0;
@@ -3165,31 +3214,31 @@ model {
         }
 
         // add etaslope and any interactions to event submodel eta
-        if (has_assoc[2,m] == 1) { // etaslope
-          vector[y_qrows[m]] val;
+        if (has_assoc01[2,m] == 1) { // etaslope
+          vector[y_qrows01[m]] val;
           if (has_grp[m] == 0) {
             val = dydt_eta_q;
           }
           else {
-            val = collapse_within_groups(dydt_eta_q, idx_grp, grp_assoc);
+            val = collapse_within_groups(dydt_eta_q, idx_grp, grp_assoc01);
           }
           mark += 1;
           e_eta = e_eta + a_beta[mark] * (val - a_xbar[mark]);
         }
-        if (has_assoc[10,m] == 1) { // etaslope*data
+        if (has_assoc01[10,m] == 1) { // etaslope*data
           int idx1 = idx_data[m,1];
           int idx2 = idx_data[m,2];
           int J = a_K_data[mark2];
           int j_shift = (mark2 == 1) ? 0 : sum(a_K_data[1:(mark2-1)]);
           for (j in 1:J) {
-            vector[y_qrows[m]] val;
+            vector[y_qrows01[m]] val;
             int sel = j_shift + j;
             if (has_grp[m] == 0) {
-              val = dydt_eta_q .* y_x_data[idx1:idx2, sel];
+              val = dydt_eta_q .* y_x_data01[idx1:idx2, sel];
             }
             else {
-              val = collapse_within_groups(dydt_eta_q .* y_x_data[idx1:idx2, sel],
-                                           idx_grp, grp_assoc);
+              val = collapse_within_groups(dydt_eta_q .* y_x_data01[idx1:idx2, sel],
+                                           idx_grp, grp_assoc01);
             }
             mark += 1;
             e_eta = e_eta + a_beta[mark] * (val - a_xbar[mark]);
@@ -3199,9 +3248,9 @@ model {
 
       //----- etaauc
 
-      if (has_assoc[3,m] == 1) { // etaauc
-        vector[y_qrows_for_auc] eta_auc_tmp; // eta at all auc qpts (for submodel m)
-        vector[y_qrows[m]] val;              // eta following summation over auc qpts
+      if (has_assoc01[3,m] == 1) { // etaauc
+        vector[y_qrows01_for_auc] eta_auc_tmp; // eta at all auc qpts (for submodel m)
+        vector[y_qrows01[m]] val;              // eta following summation over auc qpts
         if (m == 1) {
           int bMat1_colshift = 0;
           int bMat2_colshift = 0;
@@ -3251,7 +3300,7 @@ model {
                                      intercept_type[3]);
         }
         mark += 1;
-        for (r in 1:y_qrows[m]) {
+        for (r in 1:y_qrows01[m]) {
           vector[auc_qnodes] val_tmp;
           vector[auc_qnodes] wgt_tmp;
           val_tmp = eta_auc_tmp[((r-1) * auc_qnodes + 1):(r * auc_qnodes)];
@@ -3264,65 +3313,65 @@ model {
       //----- muvalue and any interactions
 
       mark2 += 1;
-      if (has_assoc[4,m]  == 1 || // muvalue
-          has_assoc[11,m] == 1 || // muvalue * data
-          has_assoc[15,m] == 1 || // muvalue * etavalue
-          has_assoc[16,m] == 1) { // muvalue * muvalue
+      if (has_assoc01[4,m]  == 1 || // muvalue
+          has_assoc01[11,m] == 1 || // muvalue * data
+          has_assoc01[15,m] == 1 || // muvalue * etavalue
+          has_assoc01[16,m] == 1) { // muvalue * muvalue
 
         // declare and define mu for submodel m
-        vector[y_qrows[m]] mu_tmp;
+        vector[y_qrows01[m]] mu_tmp;
 #include /model/make_eta_tmp.stan
         mu_tmp = evaluate_mu(eta_tmp, family[m], link[m]);
 
         // add muvalue and any interactions to event submodel eta
-        if (has_assoc[4,m] == 1) { // muvalue
-          vector[y_qrows[m]] val;
+        if (has_assoc01[4,m] == 1) { // muvalue
+          vector[y_qrows01[m]] val;
           if (has_grp[m] == 0) {
             val = mu_tmp;
           }
           else {
-            val = collapse_within_groups(mu_tmp, idx_grp, grp_assoc);
+            val = collapse_within_groups(mu_tmp, idx_grp, grp_assoc01);
           }
           mark += 1;
           e_eta = e_eta + a_beta[mark] * (val - a_xbar[mark]);
         }
-        if (has_assoc[11,m] == 1) { // muvalue*data
+        if (has_assoc01[11,m] == 1) { // muvalue*data
           int tmp = a_K_data[mark2];
           int j_shift = (mark2 == 1) ? 0 : sum(a_K_data[1:(mark2-1)]);
           for (j in 1:tmp) {
-            vector[y_qrows[m]] val;
+            vector[y_qrows01[m]] val;
             int sel = j_shift + j;
             if (has_grp[m] == 0) {
-              val = mu_tmp .* y_x_data[idx_data[m,1]:idx_data[m,2], sel];
+              val = mu_tmp .* y_x_data01[idx_data[m,1]:idx_data[m,2], sel];
             }
             else {
               val = collapse_within_groups(
-                mu_tmp .* y_x_data[idx_data[m,1]:idx_data[m,2], sel],
-                idx_grp, grp_assoc);
+                mu_tmp .* y_x_data01[idx_data[m,1]:idx_data[m,2], sel],
+                idx_grp, grp_assoc01);
             }
             mark += 1;
             e_eta = e_eta + a_beta[mark] * (val - a_xbar[mark]);
           }
         }
-        mark3 += 1; // count even if assoc type isn't used
-        if (has_assoc[15,m] == 1) { // muvalue*etavalue
+        mark3 += 1; // count even if assoc01 type isn't used
+        if (has_assoc01[15,m] == 1) { // muvalue*etavalue
           for (j in 1:size_which_interactions[mark3]) {
             int j_shift = (mark3 == 1) ? 0 : sum(size_which_interactions[1:(mark3-1)]);
             int sel = which_interactions[j+j_shift];
-            vector[y_qrows[m]] val;
+            vector[y_qrows01[m]] val;
 #include /model/make_eta_tmp2.stan
             val = mu_tmp .* eta_tmp2;
             mark += 1;
             e_eta = e_eta + a_beta[mark] * (val - a_xbar[mark]);
           }
         }
-        mark3 += 1; // count even if assoc type isn't used
-        if (has_assoc[16,m] == 1) { // muvalue*muvalue
+        mark3 += 1; // count even if assoc01 type isn't used
+        if (has_assoc01[16,m] == 1) { // muvalue*muvalue
           for (j in 1:size_which_interactions[mark3]) {
             int j_shift = (mark3 == 1) ? 0 : sum(size_which_interactions[1:(mark3-1)]);
             int sel = which_interactions[j+j_shift];
-            vector[y_qrows[m]] val;
-            vector[y_qrows[sel]] mu_tmp2;
+            vector[y_qrows01[m]] val;
+            vector[y_qrows01[sel]] mu_tmp2;
 #include /model/make_eta_tmp2.stan
             mu_tmp2 = evaluate_mu(eta_tmp2, family[sel], link[sel]);
             val = mu_tmp .* mu_tmp2;
@@ -3338,17 +3387,17 @@ model {
       //----- muslope and any interactions
 
       mark2 += 1;
-      if (has_assoc[5,m] == 1 || has_assoc[12,m] == 1) {
+      if (has_assoc01[5,m] == 1 || has_assoc01[12,m] == 1) {
         reject("muslope association structure has been removed.")
       }
 
       //----- muauc
 
       // add muauc to event submodel eta
-      if (has_assoc[6,m] == 1) { // muauc
+      if (has_assoc01[6,m] == 1) { // muauc
         vector[y_qrows_for_auc] eta_auc_tmp; // eta at all auc qpts (for submodel m)
         vector[y_qrows_for_auc] mu_auc_tmp;  // mu  at all auc qpts (for submodel m)
-        vector[y_qrows[m]] val;         // mu  following summation over auc qpts
+        vector[y_qrows01[m]] val;         // mu  following summation over auc qpts
         if (m == 1) {
           int bMat1_colshift = 0;
           int bMat2_colshift = 0;
