@@ -1,6 +1,3 @@
-real e_alpha01; // transformed intercept for event submodel
-real e_alpha02; // transformed intercept for event submodel
-real e_alpha12; // transformed intercept for event submodel
 // norm_const is a constant shift in log baseline hazard
 if (e_has_intercept01 == 1)
   e_alpha01 = e_gamma01[1] + norm_const01 -

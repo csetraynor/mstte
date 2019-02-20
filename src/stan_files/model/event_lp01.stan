@@ -89,7 +89,7 @@ else {
 }
 
 // increment target with log-lik for event submodel
-if (has_weights01 == 0 && prior_PD == 0) { // unweighted log likelihood
+if (has_weights == 0 && prior_PD == 0) { // unweighted log likelihood
   target += lhaz_epts01 + lsur_qpts01 - lsur_ipts01;
 }
 else if (prior_PD == 0) { // weighted log likelihood

@@ -2829,22 +2829,30 @@ get_num_assoc_pars <- function(assoc, a_mod_stuff) {
 # @param standata The list of data to pass to Stan
 # @param is_jm A logical
 # @return A character vector
-pars_to_monitor <- function(standata, is_jm = FALSE) {
+pars_to_monitor2 <- function(standata, is_msjm = FALSE) {
   c(if (standata$M > 0 && standata$intercept_type[1]) "yAlpha1",
     if (standata$M > 1 && standata$intercept_type[2]) "yAlpha2",
     if (standata$M > 2 && standata$intercept_type[3]) "yAlpha3",
     if (standata$M > 0 && standata$yK[1]) "yBeta1",
     if (standata$M > 1 && standata$yK[2]) "yBeta2",
     if (standata$M > 2 && standata$yK[3]) "yBeta3",
-    if (is_jm) "e_alpha",
-    if (is_jm && standata$e_K) "e_beta",
-    if (is_jm && standata$a_K) "a_beta",
+    if (is_msjm) "e_alpha01",
+    if (is_msjm) "e_alpha02",
+    if (is_msjm) "e_alpha12",
+    if (is_msjm && standata$e_K01) "e_beta01",
+    if (is_msjm && standata$e_K02) "e_beta02",
+    if (is_msjm && standata$e_K12) "e_beta12",
+    if (is_msjm && standata$a_K01) "a_beta01",
+    if (is_msjm && standata$a_K02) "a_beta02",
+    if (is_msjm && standata$a_K12) "a_beta12",
     if (standata$bK1 > 0) "b1",
     if (standata$bK2 > 0) "b2",
     if (standata$M > 0 && standata$has_aux[1]) "yAux1",
     if (standata$M > 1 && standata$has_aux[2]) "yAux2",
     if (standata$M > 2 && standata$has_aux[3]) "yAux3",
-    if (is_jm && length(standata$basehaz_nvars)) "e_aux",
+    if (is_msjm && length(standata$basehaz_nvars01)) "e_aux01",
+    if (is_msjm && length(standata$basehaz_nvars02)) "e_aux02",
+    if (is_msjm && length(standata$basehaz_nvars12)) "e_aux12",
     if (standata$prior_dist_for_cov == 2 && standata$bK1 > 0) "bCov1",
     if (standata$prior_dist_for_cov == 2 && standata$bK2 > 0) "bCov2",
     if (standata$prior_dist_for_cov == 1 && standata$len_theta_L) "theta_L",
@@ -2858,7 +2866,7 @@ pars_to_monitor <- function(standata, is_jm = FALSE) {
 #
 # @param e_mod_stuff A list object returned by a call to the handle_coxmod function
 # @param standata The data list that will be passed to Stan
-get_prefit_inits2 <- function(init_fit, e_mod, assoc_ids, prior_stuff, prior_aux_stuff, standata) {
+get_prefit_inits2 <- function(init_fit, e_mod, assoc_ids, prior_stuff, prior_aux_stuff, standata, ) {
 
   init_means <- rstan::get_posterior_mean(init_fit)
   init_nms   <- rownames(init_means)
@@ -3837,3 +3845,66 @@ standata_add_assoc_extras12 <- function(standata, a_mod, assoc) {
   }
   standata
 }
+
+#--------------- Functions related to standata and sampling
+
+# Set arguments for sampling for stan_jm
+#
+# Prepare a list of arguments to use with \code{rstan::sampling} via
+# \code{do.call}.
+#
+# *Note that this differs from the set_sampling_args function in that
+# it uses a different default adapt_delta and max_treedepth. Using a 
+# shorter treedepth seems to stop the sampler trailing off during early 
+# iterations and can drastically reduce the model estimation time, and 
+# in most examples using a shorter treedepth hasn't compromised the sampler
+# at later interations (ie, at later iterations the sampler doesn't
+# hit the maximum treedepth). The default adapt_delta depends on the 
+# largest number of group-specific parameters for any single grouping
+# factor in the model.
+#
+# @param object The stanfit object to use for sampling.
+# @param cnms The component names for the group level parameters combined
+#   across all glmer submodels. This is used to determine the maximum number
+#   of parameters for any one grouping factor in the model, which in turn is
+#   used to determine the default adapt_delta.
+# @param user_dots The contents of \code{...} from the user's call to
+#   the \code{stan_jm} modeling function.
+# @param user_adapt_delta The value for \code{adapt_delta} specified by the
+#   user.
+# @param user_max_treedepth The value for \code{max_treedepth} specified by the
+#   user.
+# @param ... Other arguments to \code{\link[rstan]{sampling}} not coming from
+#   \code{user_dots} (e.g. \code{pars}, \code{init}, etc.)
+# @return A list of arguments to use for the \code{args} argument for 
+#   \code{do.call(sampling, args)}.
+set_jm_sampling_args <- function(object, cnms, user_dots = list(), 
+                                 user_adapt_delta = NULL, 
+                                 user_max_treedepth = NULL, 
+                                 ...) {
+  args <- list(object = object, ...)
+  unms <- names(user_dots)
+  for (j in seq_along(user_dots)) {
+    args[[unms[j]]] <- user_dots[[j]]
+  }
+  
+  max_p <- max(sapply(cnms, length))
+  
+  default_adapt_delta <- if (max_p > 2) 0.95 else 0.99
+  default_max_treedepth <- 10L
+  
+  if (!is.null(user_adapt_delta))
+    args$control$adapt_delta <- user_adapt_delta else 
+      if (is.null(args$control$adapt_delta))
+        args$control$adapt_delta <- default_adapt_delta
+  
+  if (!is.null(user_max_treedepth))
+    args$control$max_treedepth <- user_max_treedepth else
+      if (is.null(args$control$max_treedepth))
+        args$control$max_treedepth <- default_max_treedepth
+  
+  if (!"save_warmup" %in% unms) 
+    args$save_warmup <- FALSE  
+  
+  return(args)
+}  

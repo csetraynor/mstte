@@ -23,21 +23,22 @@ for (m in 1:M) {
       has_assoc12[14,m] == 1) { // etavalue * muvalue
 
     // declare and define eta for longitudinal submodel m
-    #include /model/make_eta12_tmp12.stan
+#include /model/make_eta_tmp12.stan
 
     // add etavalue and any interactions to event submodel eta
     if (has_assoc12[1,m] == 1) { // etavalue
       vector[y_qrows12[m]] val;
       if (has_grp12[m] == 0) {
-        val = eta_tmp;
+        val = eta_tmp12;
       }
       else {
-        val = collapse_within_groups(eta_tmp, idx_grp12, grp_assoc12);
+        val = collapse_within_groups(eta_tmp12, idx_grp12, grp_assoc12);
       }
       mark += 1;
       e_eta12 += a_beta12[mark] * (val - a_xbar12[mark]);
     }
     // !! Note that for now I only have assured that eta value will work!
+    /*
 
       mark2 += 1; // count even if assoc type isn't used
       if (has_assoc12[9,m] == 1) { // etavalue*data
@@ -66,7 +67,7 @@ for (m in 1:M) {
           int j_shift = (mark3 == 1) ? 0 : sum(size_which_interactions[1:(mark3-1)]);
           int sel = which_interactions[j+j_shift];
           vector[y_qrows12[m]] val;
-          #include /model/make_eta12_tmp2.stan
+          #include /model/make_eta_tmp2.stan
           val = eta_tmp .* eta_tmp2;
           mark += 1;
           e_eta12 += a_beta12[mark] * (val - a_xbar12[mark]);
@@ -79,7 +80,7 @@ for (m in 1:M) {
       int sel = which_interactions[j+j_shift];
       vector[y_qrows12[m]] val;
       vector[y_qrows12[sel]] mu_tmp2;
-      #include /model/make_eta12_tmp2.stan
+      #include /model/make_eta_tmp2.stan
       mu_tmp2 = evaluate_mu(eta_tmp2, family[sel], link[sel]);
       val = eta_tmp .* mu_tmp2;
       mark += 1;
@@ -254,7 +255,7 @@ for (m in 1:M) {
 
       // declare and define mu for submodel m
       vector[y_qrows12[m]] mu_tmp;
-      #include /model/make_eta12_tmp.stan
+      #include /model/make_eta_tmp.stan
       mu_tmp = evaluate_mu(eta_tmp, family[m], link[m]);
 
       // add muvalue and any interactions to event submodel eta
@@ -293,7 +294,7 @@ for (m in 1:M) {
           int j_shift = (mark3 == 1) ? 0 : sum(size_which_interactions[1:(mark3-1)]);
           int sel = which_interactions[j+j_shift];
           vector[y_qrows12[m]] val;
-          #include /model/make_eta12_tmp2.stan
+          #include /model/make_eta_tmp2.stan
           val = mu_tmp .* eta_tmp2;
           mark += 1;
           e_eta12 = e_eta12 + a_beta12[mark] * (val - a_xbar12[mark]);
@@ -306,7 +307,7 @@ for (m in 1:M) {
       int sel = which_interactions[j+j_shift];
       vector[y_qrows12[m]] val;
       vector[y_qrows12[sel]] mu_tmp2;
-      #include /model/make_eta12_tmp2.stan
+      #include /model/make_eta_tmp2.stan
       mu_tmp2 = evaluate_mu(eta_tmp2, family[sel], link[sel]);
       val = mu_tmp .* mu_tmp2;
       mark += 1;
@@ -390,15 +391,16 @@ for (m in 1:M) {
       val[r] = sum(wgt_tmp .* val_tmp);
       }
       e_eta12 += a_beta12[mark] * (val - a_xbar12[mark]);
+      */
       }
 
       }
 
       //-----  shared random effects
 
-      if (sum_size_which_b > 0) {
+      if (sum_size_which_b12 > 0) {
       reject("shared_b has been removed.")
       }
-      if (sum_size_which_coef > 0) {
+      if (sum_size_which_coef12 > 0) {
       reject("shared_coef has been removed.")
       }

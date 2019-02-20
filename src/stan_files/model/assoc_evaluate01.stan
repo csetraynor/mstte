@@ -23,21 +23,22 @@
           has_assoc01[14,m] == 1) { // etavalue * muvalue
 
         // declare and define eta for longitudinal submodel m
-#include /model/make_eta01_tmp01.stan
+#include /model/make_eta_tmp01.stan
 
         // add etavalue and any interactions to event submodel eta
         if (has_assoc01[1,m] == 1) { // etavalue
           vector[y_qrows01[m]] val;
           if (has_grp01[m] == 0) {
-            val = eta_tmp;
+            val = eta_tmp01;
           }
           else {
-            val = collapse_within_groups(eta_tmp, idx_grp01, grp_assoc01);
+            val = collapse_within_groups(eta_tmp01, idx_grp01, grp_assoc01);
           }
           mark += 1;
           e_eta01 += a_beta01[mark] * (val - a_xbar01[mark]);
         }
         // !! Note that for now I only have assured that eta value will work!
+        /*
 
         mark2 += 1; // count even if assoc type isn't used
         if (has_assoc01[9,m] == 1) { // etavalue*data
@@ -66,7 +67,7 @@
             int j_shift = (mark3 == 1) ? 0 : sum(size_which_interactions[1:(mark3-1)]);
             int sel = which_interactions[j+j_shift];
             vector[y_qrows01[m]] val;
-#include /model/make_eta01_tmp2.stan
+#include /model/make_eta_tmp2.stan
             val = eta_tmp .* eta_tmp2;
             mark += 1;
             e_eta01 += a_beta01[mark] * (val - a_xbar01[mark]);
@@ -79,7 +80,7 @@
             int sel = which_interactions[j+j_shift];
             vector[y_qrows01[m]] val;
             vector[y_qrows01[sel]] mu_tmp2;
-#include /model/make_eta01_tmp2.stan
+#include /model/make_eta_tmp2.stan
             mu_tmp2 = evaluate_mu(eta_tmp2, family[sel], link[sel]);
             val = eta_tmp .* mu_tmp2;
             mark += 1;
@@ -254,7 +255,7 @@
 
         // declare and define mu for submodel m
         vector[y_qrows01[m]] mu_tmp;
-#include /model/make_eta01_tmp.stan
+#include /model/make_eta_tmp.stan
         mu_tmp = evaluate_mu(eta_tmp, family[m], link[m]);
 
         // add muvalue and any interactions to event submodel eta
@@ -293,7 +294,7 @@
             int j_shift = (mark3 == 1) ? 0 : sum(size_which_interactions[1:(mark3-1)]);
             int sel = which_interactions[j+j_shift];
             vector[y_qrows01[m]] val;
-#include /model/make_eta01_tmp2.stan
+#include /model/make_eta_tmp2.stan
             val = mu_tmp .* eta_tmp2;
             mark += 1;
             e_eta01 = e_eta01 + a_beta01[mark] * (val - a_xbar01[mark]);
@@ -306,7 +307,7 @@
             int sel = which_interactions[j+j_shift];
             vector[y_qrows01[m]] val;
             vector[y_qrows01[sel]] mu_tmp2;
-#include /model/make_eta01_tmp2.stan
+#include /model/make_eta_tmp2.stan
             mu_tmp2 = evaluate_mu(eta_tmp2, family[sel], link[sel]);
             val = mu_tmp .* mu_tmp2;
             mark += 1;
@@ -390,6 +391,8 @@
           val[r] = sum(wgt_tmp .* val_tmp);
         }
         e_eta01 += a_beta01[mark] * (val - a_xbar01[mark]);
+
+            */
       }
 
     }

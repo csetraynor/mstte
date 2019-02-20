@@ -1,15 +1,6 @@
 
-  vector[e_K01] e_beta01;               // log hazard ratios
-  vector[e_K02] e_beta02;               // log hazard ratios
-  vector[e_K12] e_beta12;               // log hazard ratios
 
-  vector[a_K01] a_beta01;               // assoc params
-  vector[a_K02] a_beta02;               // assoc params
-  vector[a_K12] a_beta12;               // assoc params
 
-  vector[basehaz_nvars01] e_aux01;      // basehaz params
-  vector[basehaz_nvars02] e_aux02;      // basehaz params
-  vector[basehaz_nvars12] e_aux12;      // basehaz params
  //---- Parameters for event submodel
   e_beta01 = make_beta(e_z_beta01, e_prior_dist01, e_prior_mean01,
                      e_prior_scale01, e_prior_df01, e_global_prior_scale01,

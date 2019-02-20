@@ -1,6 +1,7 @@
 library(simms)
 # library(rstanarm, lib.loc = "~/R-dev/")
 library(rstanarm)
+devtools::document()
 set.seed(9911)
 sim1 = simms::sim_idm_jm(n = 500)
 
@@ -58,34 +59,34 @@ init = "prefit"
 
 
 
-standata = msjm_stan(formulaLong = formulaLong,
-                  dataLong = dataLong,
-                  formulaMs = formulaMs,
-                  dataMs = dataMs,
-                  time_var = "tij",
-                  time_start = "Tstart",
-                  id_var = "id",
-
-                  family = gaussian,
-                  assoc = "etavalue",
-                  lag_assoc = 0,
-                  epsilon = 1E-5,
-                  prior_PD = FALSE,
-                  priorLong = rstanarm::normal(),
-                  priorLong_intercept = rstanarm::normal(),
-                  priorLong_aux = rstanarm::cauchy(0, 5),
-                  prior_covariance = rstanarm::lkj(),
-
-                  priorMs_intercept = lapply(1:3, function(x)
-                    rstanarm::normal() ),
-
-                  priorMs_aux = lapply(1:3, function(x)
-                    rstanarm::normal() ),
-
-                  priorMs = lapply(1:3, function(x)
-                    rstanarm::normal() ),
-
-                  priorMs_assoc = lapply(1:3, function(x)
-                    rstanarm::normal() ),
-                  basehaz = lapply(1:3, function(x)
-                    "weibull"))
+stanfit = msjm_stan(formulaLong = formulaLong,
+                     dataLong = dataLong,
+                     formulaMs = formulaMs,
+                     dataMs = dataMs,
+                     time_var = "tij",
+                     time_start = "Tstart",
+                     id_var = "id",
+                     init = "prefit",
+                     family = gaussian,
+                     assoc = "etavalue",
+                     lag_assoc = 0,
+                     epsilon = 1E-5,
+                     prior_PD = FALSE,
+                     priorLong = rstanarm::normal(),
+                     priorLong_intercept = rstanarm::normal(),
+                     priorLong_aux = rstanarm::cauchy(0, 5),
+                     prior_covariance = rstanarm::lkj(),
+                     
+                     priorMs_intercept = lapply(1:3, function(x)
+                       rstanarm::normal() ),
+                     
+                     priorMs_aux = lapply(1:3, function(x)
+                       rstanarm::normal() ),
+                     
+                     priorMs = lapply(1:3, function(x)
+                       rstanarm::normal() ),
+                     
+                     priorMs_assoc = lapply(1:3, function(x)
+                       rstanarm::normal() ),
+                     basehaz = lapply(1:3, function(x)
+                       "weibull"))

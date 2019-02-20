@@ -1376,7 +1376,7 @@ msjm_stan <- function(formulaLong,
     init_dots <- list(...); for (i in dropargs) init_dots[[i]] <- NULL
     init_mod  <- stanmodels$mvmer2
     init_data <- standata
-    init_pars <- pars_to_monitor(standata, is_jm = FALSE)
+    init_pars <- pars_to_monitor2(standata, is_msjm = FALSE)
     init_args <- nlist(object = init_mod,
                        data   = init_data,
                        pars   = init_pars,
@@ -1416,7 +1416,6 @@ msjm_stan <- function(formulaLong,
       })
     })
 
-
     if (is.character(init) && (init =="prefit"))
       init <- mapply(FUN = get_prefit_inits2,
                      e_mod = ms_mod,
@@ -1425,6 +1424,17 @@ msjm_stan <- function(formulaLong,
                      prior_aux_stuff = ms_prior_aux_stuff,
                      MoreArgs = nlist(standata = standata,
                                       init_fit))
+    
+    
+    if (is.character(init) && (init =="prefit"))
+      init <- mapply(FUN = get_prefit_initsidm,
+                     e_mod = ms_mod,
+                     assoc_ids = assoc_ids,
+                     prior_stuff = ms_prior_stuff,
+                     prior_aux_stuff = ms_prior_aux_stuff,
+                     MoreArgs = nlist(standata = standata,
+                                      init_fit))
+    
 
     #----------- Prior distributions -----------#
 
@@ -1551,68 +1561,67 @@ msjm_stan <- function(formulaLong,
 
   } # end msjm block
 
-  return(standata)
-
   #---------------
   # Prior summary
   #---------------
 
-  if (is_jm) {
-    prior_info <- summarize_jm_prior(
-      user_priorLong                      = y_user_prior_stuff,
-      user_priorLong_intercept            = y_user_prior_intercept_stuff,
-      user_priorLong_aux                  = y_user_prior_aux_stuff,
-      user_prior_covariance               = prior_covariance,
-      y_has_intercept                     = fetch_(y_mod, "x", "has_intercept"),
-      y_has_predictors                    = fetch_(y_mod, "x", "K") > 0,
-      adjusted_priorLong_scale            = fetch(y_prior_stuff, "prior_scale"),
-      adjusted_priorLong_intercept_scale  = fetch(y_prior_intercept_stuff, "prior_scale"),
-      adjusted_priorLong_aux_scale        = fetch(y_prior_aux_stuff, "prior_scale"),
-      family                              = family,
-      basehaz                             = e_mod$basehaz,
-      user_priorEvent                     = e_user_prior_stuff,
-      user_priorEvent_intercept           = e_user_prior_intercept_stuff,
-      user_priorEvent_aux                 = e_user_prior_aux_stuff,
-      user_priorEvent_assoc               = e_user_prior_assoc_stuff,
-      e_has_intercept                     = standata$e_has_intercept,
-      e_has_predictors                    = standata$e_K > 0,
-      has_assoc                           = standata$a_K > 0,
-      adjusted_priorEvent_scale           = e_prior_stuff$prior_scale,
-      adjusted_priorEvent_intercept_scale = e_prior_intercept_stuff$prior_scale,
-      adjusted_priorEvent_aux_scale       = e_prior_aux_stuff$prior_scale,
-      adjusted_priorEvent_assoc_scale     = e_prior_assoc_stuff$prior_scale)
-  } else {
-    prior_info <- summarize_jm_prior(
-      user_priorLong                      = y_user_prior_stuff,
-      user_priorLong_intercept            = y_user_prior_intercept_stuff,
-      user_priorLong_aux                  = y_user_prior_aux_stuff,
-      user_prior_covariance               = prior_covariance,
-      y_has_intercept                     = fetch_(y_mod, "x", "has_intercept"),
-      y_has_predictors                    = fetch_(y_mod, "x", "K") > 0,
-      adjusted_priorLong_scale            = fetch(y_prior_stuff, "prior_scale"),
-      adjusted_priorLong_intercept_scale  = fetch(y_prior_intercept_stuff, "prior_scale"),
-      adjusted_priorLong_aux_scale        = fetch(y_prior_aux_stuff, "prior_scale"),
-      family                              = family)
-  }
+  # if (is_jm) {
+  #   prior_info <- summarize_jm_prior(
+  #     user_priorLong                      = y_user_prior_stuff,
+  #     user_priorLong_intercept            = y_user_prior_intercept_stuff,
+  #     user_priorLong_aux                  = y_user_prior_aux_stuff,
+  #     user_prior_covariance               = prior_covariance,
+  #     y_has_intercept                     = fetch_(y_mod, "x", "has_intercept"),
+  #     y_has_predictors                    = fetch_(y_mod, "x", "K") > 0,
+  #     adjusted_priorLong_scale            = fetch(y_prior_stuff, "prior_scale"),
+  #     adjusted_priorLong_intercept_scale  = fetch(y_prior_intercept_stuff, "prior_scale"),
+  #     adjusted_priorLong_aux_scale        = fetch(y_prior_aux_stuff, "prior_scale"),
+  #     family                              = family,
+  #     basehaz                             = e_mod$basehaz,
+  #     user_priorEvent                     = e_user_prior_stuff,
+  #     user_priorEvent_intercept           = e_user_prior_intercept_stuff,
+  #     user_priorEvent_aux                 = e_user_prior_aux_stuff,
+  #     user_priorEvent_assoc               = e_user_prior_assoc_stuff,
+  #     e_has_intercept                     = standata$e_has_intercept,
+  #     e_has_predictors                    = standata$e_K > 0,
+  #     has_assoc                           = standata$a_K > 0,
+  #     adjusted_priorEvent_scale           = e_prior_stuff$prior_scale,
+  #     adjusted_priorEvent_intercept_scale = e_prior_intercept_stuff$prior_scale,
+  #     adjusted_priorEvent_aux_scale       = e_prior_aux_stuff$prior_scale,
+  #     adjusted_priorEvent_assoc_scale     = e_prior_assoc_stuff$prior_scale)
+  # } else {
+  #   prior_info <- summarize_jm_prior(
+  #     user_priorLong                      = y_user_prior_stuff,
+  #     user_priorLong_intercept            = y_user_prior_intercept_stuff,
+  #     user_priorLong_aux                  = y_user_prior_aux_stuff,
+  #     user_prior_covariance               = prior_covariance,
+  #     y_has_intercept                     = fetch_(y_mod, "x", "has_intercept"),
+  #     y_has_predictors                    = fetch_(y_mod, "x", "K") > 0,
+  #     adjusted_priorLong_scale            = fetch(y_prior_stuff, "prior_scale"),
+  #     adjusted_priorLong_intercept_scale  = fetch(y_prior_intercept_stuff, "prior_scale"),
+  #     adjusted_priorLong_aux_scale        = fetch(y_prior_aux_stuff, "prior_scale"),
+  #     family                              = family)
+  # }
 
   #-----------
   # Fit model
   #-----------
 
   # obtain stan model code
-  stanfit  <- if (is_jm) stanmodels$jm else stanmodels$mvmer
+  stanfit  <- if (is_msjm) stanmodels$msjm else stanmodels$mvmer2
 
   # specify parameters for stan to monitor
-  stanpars <- pars_to_monitor(standata, is_jm = is_jm)
+  stanpars <- pars_to_monitor2(standata, is_msjm = is_msjm)
 
   # report type of model to user
   txt1 <- if (M == 1) "uni"   else "multi"
-  txt2 <- if (is_jm)  "joint" else "glmer"
-  txt3 <- paste0("Fitting a ", txt1, "variate ", txt2, " model.\n\n")
+  txt2 <- if (is_msjm)  "joint multi-state model with " else "glmer"
+  txt3 <- paste0("Fitting a ", txt1, "variate ", txt2, n_trans, " states.\n\n")
   txt4 <- "Please note the warmup may be much slower than later iterations!\n"
 
   # fit model using stan
   cat(txt3)
+  
   if (algorithm == "sampling") { # mcmc
     cat(txt4)
     args <- set_jm_sampling_args(
@@ -1626,6 +1635,8 @@ msjm_stan <- function(formulaLong,
       user_max_treedepth = max_treedepth,
       show_messages = FALSE)
     stanfit <- do.call(rstan::sampling, args)
+
+    return(stanfit)
   } else { # meanfield or fullrank vb
     args <- nlist(
       object = stanfit,
@@ -1636,7 +1647,6 @@ msjm_stan <- function(formulaLong,
     args[names(dots)] <- dots
     stanfit <- do.call(rstan::vb, args)
   }
-
 
 }
 

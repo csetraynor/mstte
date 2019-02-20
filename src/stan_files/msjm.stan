@@ -130,6 +130,17 @@ parameters {
 }
 
 transformed parameters {
+  vector[e_K01] e_beta01;               // log hazard ratios
+  vector[e_K02] e_beta02;               // log hazard ratios
+  vector[e_K12] e_beta12;               // log hazard ratios
+
+  vector[a_K01] a_beta01;               // assoc params
+  vector[a_K02] a_beta02;               // assoc params
+  vector[a_K12] a_beta12;               // assoc params
+
+  vector[basehaz_nvars01] e_aux01;      // basehaz params
+  vector[basehaz_nvars02] e_aux02;      // basehaz params
+  vector[basehaz_nvars12] e_aux12;      // basehaz params
   // declares and defines:
   //   yBeta{1,2,3}
   //   yAux{1,2,3}
@@ -138,7 +149,7 @@ transformed parameters {
   //   bMat{1,2}
 #include /tparameters/tparameters_mvmer.stan
 
-  // declares and defines:
+  // defines:
   //  e_beta{01,02,12}
   //  a_beta{01,02,12}
   //  e_aux{01,02,12}
@@ -168,9 +179,9 @@ model {
     else         e_eta12 = rep_vector(0.0, len_cpts12);
 
 
-    if (e_has_intercept01 == 1) e_eta01 = e_eta01 + e_gamma01[1];
-    if (e_has_intercept02 == 1) e_eta02 = e_eta02 + e_gamma02[1];
-    if (e_has_intercept12 == 1) e_eta12 = e_eta12 + e_gamma12[1];
+    if (e_has_intercept01 == 1) e_eta01 += e_gamma01[1];
+    if (e_has_intercept02 == 1) e_eta02 += e_gamma02[1];
+    if (e_has_intercept12 == 1) e_eta12 += e_gamma12[1];
 
     if (assoc01 == 1) {
       // declares:
@@ -199,13 +210,20 @@ model {
 #include /model/assoc_evaluate12.stan
     }
 
-      {
+    {
     // declares (and increments target with event log-lik):
     //   log_basehaz,
     //   log_{haz_q,haz_etimes,surv_etimes,event}
+    {
 #include /model/event_lp01.stan
+    }
+    {
 #include /model/event_lp02.stan
+    }
+    {
 #include /model/event_lp12.stan
+    }
+
     }
 
   }
@@ -218,6 +236,9 @@ model {
 }
 
 generated quantities {
+  real e_alpha01; // transformed intercept for event submodel
+  real e_alpha02; // transformed intercept for event submodel
+  real e_alpha12; // transformed intercept for event submodel
   // declares and defines:
   //   mean_PPD
   //   yAlpha{1,2,3}
@@ -225,7 +246,7 @@ generated quantities {
   //   bCov{1,2}
 #include /gqs/gen_quantities_mvmer.stan
 
-  // declares and defines:
+  // defines:
   // e_alpha{01,02,12}
 
   // norm_const is a constant shift in log baseline hazard
