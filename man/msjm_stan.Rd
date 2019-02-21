@@ -5,10 +5,10 @@
 \title{Bayesian joint longitudinal and multi-state models via Stan}
 \usage{
 msjm_stan(formulaLong, dataLong, formulaMs, dataMs, time_var, time_start,
-  n_trans, id_var, family = gaussian, assoc = "etavalue",
-  lag_assoc = 0, grp_assoc, epsilon = 1e-05, basehaz = c("bs",
-  "weibull", "piecewise"), basehaz_ops, qnodes = 15, init = "prefit",
-  weights, priorLong = rstanarm::normal(),
+  transition_labels, n_trans, id_var, family = gaussian,
+  assoc = "etavalue", lag_assoc = 0, grp_assoc, epsilon = 1e-05,
+  basehaz = c("bs", "weibull", "piecewise"), basehaz_ops, qnodes = 15,
+  init = "prefit", weights, priorLong = rstanarm::normal(),
   priorLong_intercept = rstanarm::normal(),
   priorLong_aux = rstanarm::cauchy(0, 5), priorMs = rstanarm::normal(),
   priorMs_intercept = rstanarm::normal(),

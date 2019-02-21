@@ -222,6 +222,22 @@ get_ppd_name <- function(x, ...) {
   paste0(x$stub, "|mean_PPD")
 }
 
+handle_quadratic <- function(d, t_var){
+  t_quad <- paste0(t_var, 2)
+  if(t_quad %in% colnames(d)){
+    d[[which(colnames(d) == t_quad)]] <- d[[which(colnames(d) == t_var)]]^2
+  }
+  return(d)
+}
+
+handle_cubic <- function(d, t_var){
+  t_cube <- paste0(t_var, 3)
+  if(t_cube %in% colnames(d)){
+    d[[which(colnames(d) == t_cube)]] <- d[[which(colnames(d) == t_var)]]^3
+  }
+  return(d)
+}
+
 # Add the variables in ...'s to the RHS of a model formula
 #
 # @param x A model formula.
@@ -1842,7 +1858,70 @@ is.stanreg   <- function(x) inherits(x, "stanreg")
 is.stansurv  <- function(x) inherits(x, "stansurv")
 is.stanms  <- function(x) inherits(x, "stanms")
 is.stanjm    <- function(x) inherits(x, "stanjm")
+is.stanmsjm <- function(x) inherits(x, "stanmsjm")
 
+# Return the appropriate stub for variable names
+#
+# @param object A stanmvreg object
+get_stub2 <- function(object) {
+  if (is.msjm(object)) "Long" else NULL  
+} 
+
+
+# Separates a names object into separate parts based on the longitudinal, 
+# event, or association parameters.
+# 
+# @param x Character vector (often rownames(fit$stan_summary))
+# @param M An integer specifying the number of longitudinal submodels.
+# @param stub The character string used at the start of the names of variables
+#   in the longitudinal/GLM submodels
+# @param ... Arguments passed to grep
+# @return A list with x separated out into those names corresponding
+#   to parameters from the M longitudinal submodels, the event submodel
+#   or association parameters.
+collect_nms_idm <- function(x, M, stub = "Long", ...) {
+  ppd <- grep(paste0("^", stub, ".{1}\\mean_PPD"), x, ...)      
+  y <- lapply(1:M, function(m) grep(mod2rx(m, stub = stub), x, ...))
+  y_extra <- lapply(1:M, function(m) 
+    c(grep(paste0("^", stub, m, "\\|sigma"), x, ...),
+      grep(paste0("^", stub, m, "\\|shape"), x, ...),
+      grep(paste0("^", stub, m, "\\|lambda"), x, ...),
+      grep(paste0("^", stub, m, "\\|reciprocal_dispersion"), x, ...)))             
+  y <- lapply(1:M, function(m) setdiff(y[[m]], c(y_extra[[m]], ppd[m])))
+  e <- grep(mod2rx("^Event"), x, ...)     
+  e_extra <- c(grep("^Event\\|weibull-shape|^Event\\|b-splines-coef|^Event\\|piecewise-coef", x, ...))         
+  e <- setdiff(e, e_extra)
+  a <- grep(mod2rx("^Assoc"), x, ...)
+  b <- b_names(x, ...)
+  y_b <- lapply(1:M, function(m) b_names_M(x, m, stub = stub, ...))
+  alpha <- grep("^.{5}\\|\\(Intercept\\)", x, ...)      
+  alpha <- c(alpha, grep(pattern=paste0("^", stub, ".{1}\\|\\(Intercept\\)"), x=x, ...))
+  beta <- setdiff(c(unlist(y), e, a), alpha)  
+  nlist(y, y_extra, y_b, e, e_extra, a, b, alpha, beta, ppd) 
+}
+
+
+# Supplies names for the output list returned by most stanmvreg methods
+#
+# @param object The list object to which the names are to be applied
+# @param M The number of longitudinal/GLM submodels. If NULL then the number of
+#   longitudinal/GLM submodels is assumed to be equal to the length of object.
+# @param stub The character string to use at the start of the names for
+#   list items related to the longitudinal/GLM submodels
+list_nms <- function(object, M = NULL, stub = "Long") {
+  ok_type <- is.null(object) || is.list(object) || is.vector(object)
+  if (!ok_type) 
+    stop("'object' argument should be a list or vector.")
+  if (is.null(object))
+    return(object)
+  if (is.null(M)) 
+    M <- length(object)
+  nms <- paste0(stub, 1:M)
+  if (length(object) > M) 
+    nms <- c(nms, "Event")
+  names(object) <- nms
+  object
+}
 # Return the spline basis for the given type of baseline hazard.
 #
 # @param times A numeric vector of times at which to evaluate the basis.
@@ -2159,3 +2238,59 @@ rolling_merge <- function(data, ids, times, grps = NULL) {
   val
 }
 
+# Return the names for the association parameters
+get_assoc_name <- function(a_mod, assoc, ...) {
+  M    <- length(a_mod)
+  a    <- assoc
+  ev   <- "etavalue"
+  es   <- "etaslope"
+  ea   <- "etaauc"
+  mv   <- "muvalue"
+  ms   <- "muslope"
+  ma   <- "muauc"
+  evd  <- "etavalue_data"
+  esd  <- "etaslope_data"
+  mvd  <- "muvalue_data"
+  msd  <- "muslope_data"
+  evev <- "etavalue_etavalue"
+  evmv <- "etavalue_muvalue"
+  mvev <- "muvalue_etavalue"
+  mvmv <- "muvalue_muvalue"
+  p    <- function(...)  paste0(...)
+  indx <- function(x, m) paste0("Long", assoc["which_interactions",][[m]][[x]])
+  cnms <- function(x, m) colnames(a_mod[[m]][["X_data"]][[x]])
+  nms <- character()
+  for (m in 1:M) {
+    stub <- paste0("Assoc|Long", m, "|")
+    # order matters here! (needs to line up with the monitored stanpars)
+    if (a[ev,  ][[m]]) nms <- c(nms, p(stub, ev                             ))
+    if (a[evd, ][[m]]) nms <- c(nms, p(stub, ev, ":", cnms(evd,  m)         ))
+    if (a[evev,][[m]]) nms <- c(nms, p(stub, ev, ":", indx(evev, m), "|", ev))
+    if (a[evmv,][[m]]) nms <- c(nms, p(stub, ev, ":", indx(evmv, m), "|", mv))
+    if (a[es,  ][[m]]) nms <- c(nms, p(stub, es                             ))
+    if (a[esd, ][[m]]) nms <- c(nms, p(stub, es, ":", cnms(esd,  m)         ))    
+    if (a[ea,  ][[m]]) nms <- c(nms, p(stub, ea                             ))
+    if (a[mv,  ][[m]]) nms <- c(nms, p(stub, mv                             ))
+    if (a[mvd, ][[m]]) nms <- c(nms, p(stub, mv, ":", cnms(mvd,  m)         ))  
+    if (a[mvev,][[m]]) nms <- c(nms, p(stub, mv, ":", indx(mvev, m), "|", ev))
+    if (a[mvmv,][[m]]) nms <- c(nms, p(stub, mv, ":", indx(mvmv, m), "|", mv))
+    if (a[ms,  ][[m]]) nms <- c(nms, p(stub, ms                             ))
+    if (a[msd, ][[m]]) nms <- c(nms, p(stub, ms, ":", cnms(msd,  m)         ))  
+    if (a[ma,  ][[m]]) nms <- c(nms, p(stub, ma                             ))
+  }
+  nms
+}
+
+# Drop named attributes listed in ... from the object x
+#
+# @param x Any object with attributes
+# @param ... The named attributes to drop
+drop_attributes <- function(x, ...) {
+  dots <- list(...)
+  if (length(dots)) {
+    for (i in dots) {
+      attr(x, i) <- NULL
+    }
+  }
+  x
+}
