@@ -243,7 +243,12 @@ autoscale_prior <- function(prior_stuff, response = NULL, predictors = NULL,
     # The SD will be used for autoscaling the prior for each association parameter.
     if (is.null(family))
       stop("'family' cannot be NULL when autoscaling association parameters.")
+    
+    
     assoc_terms <- make_assoc_terms(family = family, assoc = assoc, ...)
+    assoc_terms <- assoc_terms[!is.na(assoc_terms),]
+    
+    
     ps$a_xbar <- as.array(apply(assoc_terms, 2L, mean))
     if (ps$prior_dist > 0L && ps$prior_autoscale) {
       a_beta_scale <- apply(assoc_terms, 2L, get_scale_value)
@@ -278,7 +283,7 @@ autoscale_prior <- function(prior_stuff, response = NULL, predictors = NULL,
 #   the parameter values to use when constructing the linear predictor(s) in
 #   make_assoc_terms.
 # @return A named list with the same structure as returned by handle_glm_prior
-autoscale_prior2 <- function(prior_stuff, response = NULL, predictors = NULL, a_k,
+autoscale_prior_assoc <- function(prior_stuff, response = NULL, predictors = NULL, a_k,
                              family = NULL, QR = FALSE, min_prior_scale = 1e-12,
                              assoc = NULL, ...) {
   if(!a_k){
@@ -314,6 +319,10 @@ autoscale_prior2 <- function(prior_stuff, response = NULL, predictors = NULL, a_
     if (is.null(family))
       stop("'family' cannot be NULL when autoscaling association parameters.")
     assoc_terms <- make_assoc_terms(family = family, assoc = assoc, ...)
+    
+    
+    assoc_terms <- assoc_terms[complete.cases(assoc_terms), , drop = FALSE]
+    
     ps$a_xbar <- as.array(apply(assoc_terms, 2L, mean))
     if (ps$prior_dist > 0L && ps$prior_autoscale) {
       a_beta_scale <- apply(assoc_terms, 2L, get_scale_value)
@@ -671,657 +680,6 @@ get_Sigma_nms <- function(cnms) {
   paste0("Sigma[", unlist(Sigma_nms), "]")
 }
 
-# Construct a list with information about the event submodel
-#
-# @param formula The model formula for the event submodel
-# @param data The data for the event submodel
-# @param qnodes An integer specifying the number of GK quadrature nodes
-# @param id_var The name of the ID variable
-# @param y_id_list A character vector with a unique list of subject IDs
-#   (factor levels) that appeared in the longitudinal submodels
-# @return A named list with the following elements:
-#   mod: The fitted Cox model.
-#   entrytime: Named vector of numeric entry times.
-#   eventtime: Named vector of numeric event times.
-#   status: Named vector of event/failure indicators.
-#   Npat: Number of individuals.
-#   Nevents: Total number of events/failures.
-#   id_list: A vector of unique subject IDs, as a factor.
-#   qnodes: The number of GK quadrature nodes.
-#   qwts,qpts: Vector of unstandardised quadrature weights and points.
-#     The vector is ordered such that the first Npat items are the
-#     weights/locations of the first quadrature point, then the second
-#     Npat items are the weights/locations for the second quadrature
-#     point, and so on.
-#   qids: The subject IDs corresponding to each element of qwts/qpts.
-#   epts: The event times, but only for individuals who were NOT censored
-#     (i.e. those individual who had an event).
-#   eids: The subject IDs corresponding to each element of epts.
-#   cpts: Combined vector of failure and quadrature times: c(epts, qpts).
-#   cids: Combined vector subject IDs: c(eids, qids).
-#   Xq: The model matrix for the event submodel, centred and no intercept.
-#   Xbar: Vector of column means for the event submodel model matrix.
-#   K: Number of predictors for the event submodel.
-#   norm_const: Scalar, the constant used to shift the event submodel
-#     linear predictor (equal to the log of the mean incidence rate).
-#   model_frame: The model frame for the fitted Cox model, but with the
-#     subject ID variable also included.
-#   tvc: Logical, if TRUE then a counting type Surv() object was used
-#     in the fitted Cox model (ie. time varying covariates).
-handle_e_mod2 <- function(t_start, formula, data, basehaz, qnodes, meta) {
-  
-  if (!requireNamespace("survival"))
-    stop("the 'survival' package must be installed to use this function")
-  if (!requireNamespace("data.table"))
-    stop("the 'data.table' package must be installed to use this function")
-  
-  id_var      <- meta$id_var
-  id_list     <- meta$id_list
-  basehaz_ops <- meta$basehaz_ops
-  
-  # parse formula, create model data & frame
-  #formula   <- parse_formula(formula, data)
-  formula2  <- addto_formula(formula$formula, id_var) # includes id_var
-  data      <- make_model_data (formula2, data)       # row subsetting etc.
-  mf_stuff  <- make_model_frame(formula2, data)       # returns Surv object
-  
-  mf <- mf_stuff$mf # model frame
-  mt <- mf_stuff$mt # model terms
-  
-  mf[[id_var]] <- promote_to_factor(mf[[id_var]]) # same as lme4
-  ids <- factor(mf[[id_var]])
-  
-  # error checks for the id variable
-  # validate_jm_ids(y_ids = id_list, e_ids = ids)
-  
-  # entry and exit times for each row of data
-  t_beg <- make_t(mf, type = "beg") # entry time
-  t_end <- make_t(mf, type = "end") # exit  time
-  t_upp <- make_t(mf, type = "upp") # upper time for interval censoring
-  
-  # event indicator for each row of data
-  status <- make_d(mf)
-  
-  event <- as.logical(status == 1)
-  rcens <- as.logical(status == 0)
-  lcens <- as.logical(status == 2)
-  icens <- as.logical(status == 3)
-  
-  if (any(status < 0 || status > 3))
-    stop2("Invalid status indicator in Surv object.")
-  if (any(lcens))
-    stop2("Cannot handle left censoring.")
-  
-  # delayed entry indicator for each row of data
-  delayed  <- as.logical(!t_beg == 0)
-  
-  # time variables for stan
-  t_event   <- t_end[event]   # exact event time
-  t_rcens   <- t_end[rcens]   # right censoring time
-  t_lcens   <- t_end[lcens]   # left  censoring time
-  t_lower   <- t_end[icens]   # lower limit of interval censoring time
-  t_upper   <- t_upp[icens]   # upper limit of interval censoring time
-  t_delayed <- t_beg[delayed] # delayed entry time
-  t_end_a   <- t_end + t_start
-  # entry and exit times for each individual
-  t_tmp <- t_end; t_tmp[icens] <- t_upp[icens]
-  entrytime <- tapply(t_beg, ids, min)
-  exittime  <- tapply(t_tmp, ids, max)
-  
-  # dimensions
-  nevent   <- sum(event)
-  nrcens   <- sum(rcens)
-  nlcens   <- sum(lcens)
-  nicens   <- sum(icens)
-  ndelayed <- sum(delayed)
-  
-  # baseline hazard
-  ok_basehaz <- c("weibull", "bs", "piecewise")
-  ok_basehaz_ops <- get_ok_basehaz_ops(basehaz)
-  basehaz <- handle_basehaz2(basehaz        = basehaz,
-                             basehaz_ops    = basehaz_ops,
-                             ok_basehaz     = ok_basehaz,
-                             ok_basehaz_ops = ok_basehaz_ops,
-                             times          = t_end,
-                             status         = event,
-                             upper_times    = t_upp)
-  nvars <- basehaz$nvars # number of basehaz aux parameters
-  
-  # flag if intercept is required for baseline hazard
-  has_intercept <- ai(has_intercept(basehaz))
-  
-  # standardised weights and nodes for quadrature
-  qq <- get_quadpoints(nodes = qnodes)
-  qp <- qq$points
-  qw <- qq$weights
-  
-  # event times & ids (for events only)
-  epts <- t_end[event] # event times
-  epts_a <- t_end[event] + t_start[event]
-  
-  eids_a <- eids <- ids  [event] # subject ids
-  
-  # quadrature points & weights, evaluated for each row of data
-  qpts <- uapply(qp, unstandardise_qpts, t_beg, t_end)
-  qwts <- uapply(qw, unstandardise_qwts, t_beg, t_end)
-  
-  
-  qpts_a <- uapply(qp, unstandardise_qpts, t_beg + t_start, t_end + t_start)
-  qwts_a <- uapply(qw, unstandardise_qwts, t_beg + t_start, t_end + t_start)
-  qids <- qids_a <- rep(ids, qnodes)
-  
-  # quadrature points & weights, evaluated at upper limit of rows w/ interval censoring
-  if (nicens) {
-    ipts <- uapply(qp, unstandardise_qpts, t_beg[icens], t_upper)
-    iwts <- uapply(qw, unstandardise_qwts, t_beg[icens], t_upper)
-    iids <- rep(ids[icens], qnodes)
-    
-    ipts_a <- uapply(qp, unstandardise_qpts, t_beg[icens] + t_start[icens], t_upper + t_start)
-    iwts_a <- uapply(qw, unstandardise_qwts, t_beg[icens]+ t_start[icens], t_upper + t_start)
-    iids_a <- rep(ids[icens], qnodes)
-    
-    
-  } else {
-    ipts <- rep(0,0)
-    iwts <- rep(0,0)
-    iids <- rep(0,0)
-    ipts_a <- rep(0,0)
-    iwts_a <- rep(0,0)
-    iids_a <- rep(0,0)
-  }
-  
-  cpts <- c(epts, qpts, ipts)
-  cids <- c(eids, qids, iids)
-  
-  cpts_a <- c(epts_a, qpts_a, ipts_a)
-  cids_a <- c(eids_a, qids_a, iids_a)
-  
-  # # quadrature points & weights, evaluated for rows with delayed entry
-  # if (ndelayed) {
-  #   qpts_delayed <- uapply(qp, unstandardise_qpts, 0, t_delayed) # qpts for entry time
-  #   qwts_delayed <- uapply(qw, unstandardise_qwts, 0, t_delayed) # qwts for entry time
-  # } else {
-  #   qpts_delayed <- rep(0,0)
-  #   qwts_delayed <- rep(0,0)
-  # }
-  
-  # dimensions
-  len_epts <- length(epts)
-  len_qpts <- length(qpts)
-  len_ipts <- length(ipts)
-  len_cpts <- length(cpts)
-  idx_cpts <- get_idx_array(c(len_epts, len_qpts, len_ipts))
-  
-  # basis terms for baseline hazard
-  basis_epts <-  make_basis(epts, basehaz)
-  basis_qpts <-  make_basis(qpts, basehaz)
-  basis_ipts <-  make_basis(ipts, basehaz)
-  
-  # predictor matrices
-  x <- make_x(formula$tf_form, mf)$x
-  K <- ncol(x)
-  
-  x_cpts <- rbind(keep_rows(x, event),
-                  rep_rows (x, times = qnodes),
-                  rep_rows (keep_rows(x, icens), times = qnodes))
-  
-  # fit a cox model
-  if (formula$surv_type %in% c("right", "counting")) {
-    mod <- survival::coxph(formula$formula, data = data, x = TRUE)
-  } else if (formula$surv_type %in% c("interval", "interval2")) {
-    mod <- survival::survreg(formula$formula, data = data, x = TRUE)
-  } else {
-    stop("Bug found: Invalid Surv type.")
-  }
-  
-  # calculate mean log incidence, used as a shift in log baseline hazard
-  norm_const <- log(nevent / sum(t_end - t_beg))
-  
-  # get time start for initial, intermidiate and absorving states
-  t_state = data[ ,time_start]
-  
-  nlist(mod,
-        surv_type = formula$surv_type,
-        qnodes,
-        basehaz,
-        has_intercept,
-        has_icens = as.logical(nicens),
-        model_frame = mf,
-        entrytime,
-        exittime,
-        norm_const,
-        t_beg,
-        t_end,
-        t_end_a,
-        t_start,
-        t_upp,
-        t_event,
-        t_rcens,
-        t_lcens,
-        t_lower,
-        t_upper,
-        t_state,
-        status,
-        nevent,
-        nrcens,
-        nlcens,
-        nicens,
-        ndelayed,
-        len_epts,
-        len_qpts,
-        len_ipts,
-        len_cpts,
-        idx_cpts,
-        epts,
-        qpts,
-        ipts,
-        cpts,
-        qwts,
-        iwts,
-        eids,
-        qids,
-        iids,
-        cids,
-        epts_a,
-        qpts_a,
-        ipts_a,
-        cpts_a,
-        qwts_a,
-        iwts_a,
-        eids_a,
-        qids_a,
-        iids_a,
-        cids_a,
-        basis_epts,
-        basis_qpts,
-        basis_ipts,
-        x,
-        x_cpts,
-        x_bar = colMeans(x),
-        K)
-}
-
-
-# Check that the observation times for the longitudinal submodel are all
-# positive and not observed after the individual's event time
-#
-# @param data A data frame (data for one longitudinal submodel)
-# @param eventtimes A named numeric vector with the event time for each
-#   individual. The vector names should be the individual ids.
-# @param id_var,time_var The ID and time variable in the longitudinal data.
-# @return Nothing.
-validate_observation_times <-function(data, exittime, id_var, time_var) {
-  if (!time_var %in% colnames(data))
-    STOP_no_var(time_var)
-  if (!id_var %in% colnames(data))
-    STOP_no_var(id_var)
-  if (any(data[[time_var]] < 0))
-    stop2("Values for the time variable (", time_var, ") should not be negative.")
-  mt  <- tapply(data[[time_var]], factor(data[[id_var]]), max) # max observation time
-  nms <- names(mt)                                       # patient IDs
-  if (is.null(nms))
-    stop2("Bug found: cannot find names in the vector of exit times.")
-  sel <- which(sapply(nms, FUN = function(i) mt[i] > exittime[i]))
-  if (length(sel))
-    stop2("The following individuals have observation times in the longitudinal ",
-          "data that are later than their event time: ", comma(nms[sel]))
-}
-
-# Validate the user input to the lag_assoc argument of stan_jm
-#
-# @param lag_assoc The user input to the lag_assoc argument
-# @param M Integer specifying the number of longitudinal submodels
-validate_lag_assoc <- function(lag_assoc, M) {
-  if (length(lag_assoc) == 1L)
-    lag_assoc <- rep(lag_assoc, M)
-  if (!length(lag_assoc) == M)
-    stop2("'lag_assoc' should length 1 or length equal to the ",
-          "number of markers (", M, ").")
-  if (!is.numeric(lag_assoc))
-    stop2("'lag_assoc' must be numeric.")
-  if (any(lag_assoc < 0))
-    stop2("'lag_assoc' must be non-negative.")
-  lag_assoc
-}
-
-
-# Filter associated times between the longitudinal model and hazard sumbmodel
-#
-# @param x Long dataset
-# @param t_var time variable from long dataset.
-# @param t time event vector
-assoc_time <- function(mod, id_state, x, t_var){
-  t <- mod$t_end_a
-  tmpdf <- data.frame(id = id_state,
-                      eventtime = t)
-  tmpx <- dplyr::left_join(x, tmpdf, by = "id")
-  
-  out <- tmpx[[t_var]] <= tmpx[["eventtime"]]
-  out[is.na(out)] <- FALSE
-  out
-}
-
-extract_id <- function(x, id_var){
-  x[[id_var]]
-}
-
-
-# Construct a list with information about the multi-state submodel(s)
-#
-# @param formula The model formula for the event submodel
-# @param data The data for the event submodel
-# @param qnodes An integer specifying the number of GK quadrature nodes
-# @param id_var The name of the ID variable
-# @param y_id_list A character vector with a unique list of subject IDs
-#   (factor levels) that appeared in the longitudinal submodels
-# @return A named list with the following elements:
-#   mod: The fitted Cox model.
-#   entrytime: Named vector of numeric entry times.
-#   eventtime: Named vector of numeric event times.
-#   status: Named vector of event/failure indicators.
-#   Npat: Number of individuals.
-#   Nevents: Total number of events/failures.
-#   id_list: A vector of unique subject IDs, as a factor.
-#   qnodes: The number of GK quadrature nodes.
-#   qwts,qpts: Vector of unstandardised quadrature weights and points.
-#     The vector is ordered such that the first Npat items are the
-#     weights/locations of the first quadrature point, then the second
-#     Npat items are the weights/locations for the second quadrature
-#     point, and so on.
-#   qids: The subject IDs corresponding to each element of qwts/qpts.
-#   epts: The event times, but only for individuals who were NOT censored
-#     (i.e. those individual who had an event).
-#   eids: The subject IDs corresponding to each element of epts.
-#   cpts: Combined vector of failure and quadrature times: c(epts, qpts).
-#   cids: Combined vector subject IDs: c(eids, qids).
-#   Xq: The model matrix for the event submodel, centred and no intercept.
-#   Xbar: Vector of column means for the event submodel model matrix.
-#   K: Number of predictors for the event submodel.
-#   norm_const: Scalar, the constant used to shift the event submodel
-#     linear predictor (equal to the log of the mean incidence rate).
-#   model_frame: The model frame for the fitted Cox model, but with the
-#     subject ID variable also included.
-#   tvc: Logical, if TRUE then a counting type Surv() object was used
-#     in the fitted Cox model (ie. time varying covariates).
-handle_ms_mod <- function(formula, data, meta) {
-  
-  if (!requireNamespace("survival"))
-    stop("the 'survival' package must be installed to use this function")
-  if (!requireNamespace("data.table"))
-    stop("the 'data.table' package must be installed to use this function")
-  
-  id_var      <- meta$id_var
-  id_list     <- meta$id_list
-  time_start  <- meta$time_start
-  qnodes      <- meta$qnodes
-  basehaz     <- meta$basehaz
-  basehaz_ops <- meta$basehaz_ops
-  
-  # parse formula, create model data & frame
-  formula2  <- lapply(formula, function(f) addto_formula(f$formula, id_var)) # includes id_var
-  
-  mf_stuff <-  lapply(seq_along(formula2), function(i) {
-    make_model_frame(formula2[[i]], data[[i]])
-  })
-  
-  mf <- lapply(mf_stuff, function(m) m$mf)   # model frame
-  mt <- lapply(mf_stuff, function(m) m$mt)  # model terms
-  
-  for(i in seq_along(mf)){
-    mf[[i]][[id_var]] <- promote_to_factor(mf[[i]][[id_var]]) # same as lme4
-  }
-  
-  ids <- lapply(mf, function(mf) factor(mf[[id_var]]) )
-  
-  # error checks for the id variable
-  validate_jm_ids(y_ids = id_list, e_ids = uu(ids) )
-  
-  # entry and exit times for each row of data
-  t_beg <- lapply(mf, function(m) make_t(m, type = "beg") ) # entry time
-  t_end <- lapply(mf, function(m) make_t(m, type = "end") ) # exit time
-  t_upp <- lapply(mf, function(m) make_t(m, type = "upp") ) # upper time for
-  
-  # ensure no event or censoring times are zero (leads to degenerate
-  # estimate for log hazard for most baseline hazards, due to log(0))
-  
-  for(i in seq_along(t_end ) ){
-    check1 <- any(t_end[[i]] <= 0, na.rm = TRUE)
-    if (check1)
-      stop2("All event and censoring times must be greater than 0.")
-  }
-  
-  # event indicator for each row of data
-  d <- lapply(mf, make_d)
-  
-  for(i in seq_along(status)){
-    if (any(status[[i]] < 0 || status[[i]] > 3))
-      stop2("Invalid status indicator in formula.")
-  }
-  
-  event <- lapply(d, function(d) as.logical(d == 1) )
-  rcens <- lapply(d, function(d) as.logical(d == 0) )
-  lcens <- lapply(d, function(d) as.logical(d == 2) )
-  icens <- lapply(d, function(d) as.logical(d == 3) )
-  
-  # delayed entry indicator for each row of data
-  delayed  <- lapply(t_beg, function(t_beg) as.logical(!t_beg == 0) )
-  
-  # time variables for stan
-  # time variables for stan
-  t_event <- lapply(seq_along(t_end), function(t)
-    t_end[[t]][status[[t]] == 1] )  # exact event time
-  t_rcens <- lapply(seq_along(t_end), function(t)
-    t_end[[t]][status[[t]] == 0] ) # right censoring time
-  t_lcens <- lapply(seq_along(t_end),  function(t)
-    t_end[[t]][status[[t]] == 2] ) # left censoring time
-  t_icenl <- lapply(seq_along(t_end),  function(t)
-    t_end[[t]][status[[t]] == 3] ) # lower limit of interval censoring time
-  t_icenu <- lapply(seq_along(t_upp), function(t)
-    t_upp[[t]][status[[t]] == 3] ) # upper limit of interval censoring time
-  t_delay <- lapply(seq_along(t_beg),  function(t)
-    t_beg[[t]][delayed[[t]]] )
-  
-  
-  # entry and exit times for each individual
-  t_tmp <- t_end
-  entrytime <- list(); eventtime <- list();
-  for(i in seq_along(t_tmp)){
-    t_tmp[[i]][icens[[i]]] <- t_upp[[i]][icens[[i]]]
-    entrytime[[i]] <- tapply(t_beg[[i]], ids[[i]], min)
-    eventtime[[i]] <- tapply(t_tmp[[i]], ids[[i]], max)
-    status[[i]]    <- tapply(d[[i]],     ids[[i]], max)
-  }
-  
-  # dimensions
-  nevent <- lapply(status, function(s)  sum(s == 1))
-  nrcens <- lapply(status,  function(s) sum(s == 0))
-  nlcens <- lapply(status, function(s) sum(s == 2))
-  nicens <- lapply(status, function(s) sum(s == 3))
-  ndelay <- lapply(delayed, function(d) sum(d))
-  
-  # baseline hazard
-  ok_basehaz <- c("weibull", "bs", "piecewise")
-  ok_basehaz_ops <- lapply(basehaz, function(b) get_ok_basehaz_ops(b))
-  
-  basehaz <- lapply(seq_along(basehaz), function(b)
-    SW( handle_basehaz_surv(basehaz = basehaz[[b]],
-                            basehaz_ops = basehaz_ops[[b]],
-                            ok_basehaz = ok_basehaz,
-                            ok_basehaz_ops = ok_basehaz_ops[[b]],
-                            times = t_end[[b]],
-                            status = event[[b]],
-                            min_t = min(t_beg[[b]]),
-                            max_t = max(c(t_end[[b]], t_upp[[b]]), na.rm = TRUE ) )
-    ))
-  
-  nvars <- lapply(basehaz, function(b) b$nvars)  # number of basehaz aux parameters
-  # flag if intercept is required for baseline hazard
-  has_intercept   <- lapply(basehaz, function(b) ai(has_intercept(b)) )
-  
-  nvars <- basehaz$nvars # number of basehaz aux parameters
-  
-  # flag if intercept is required for baseline hazard
-  has_intercept <- ai(has_intercept(basehaz))
-  
-  # standardised weights and nodes for quadrature
-  qq <- lapply(qnodes, get_quadpoints)
-  qp <- lapply(qq, function(qq) qq$points)
-  qw <- lapply(qq, function(qq) qq$weights)
-  
-  # quadrature points & weights, evaluated for each row of data
-  qpts_event <- list()
-  qpts_lcens <- list()
-  qpts_rcens <- list()
-  qpts_icenl <- list()
-  qpts_icenu <- list()
-  qpts_delay <- list()
-  
-  qwts_event <- list()
-  qwts_lcens <- list()
-  qwts_rcens <- list()
-  qwts_icenl <- list()
-  qwts_icenu <- list()
-  qwts_delay <- list()
-  
-  for(i in seq_along(qq)){
-    qp_i = qp[[i]]
-    qw_i = qw[[i]]
-    qpts_event[[i]] <- uapply(qp_i,unstandardise_qpts, 0, t_event[[i]])
-    qpts_lcens[[i]] <- uapply(qp_i,unstandardise_qpts, 0, t_lcens[[i]])
-    qpts_rcens[[i]] <- uapply(qp_i,unstandardise_qpts, 0, t_rcens[[i]])
-    qpts_icenl[[i]] <- uapply(qp_i,unstandardise_qpts, 0, t_icenl[[i]])
-    qpts_icenu[[i]] <- uapply(qp_i,unstandardise_qpts, 0, t_icenu[[i]])
-    qpts_delay[[i]] <- uapply(qp_i,unstandardise_qpts, 0, t_delay[[i]])
-    
-    qwts_event[[i]] <- uapply(qw_i, unstandardise_qwts, 0, t_event[[i]])
-    qwts_lcens[[i]] <- uapply(qw_i, unstandardise_qwts, 0, t_lcens[[i]])
-    qwts_rcens[[i]] <- uapply(qw_i, unstandardise_qwts, 0, t_rcens[[i]])
-    qwts_icenl[[i]] <- uapply(qw_i, unstandardise_qwts, 0, t_icenl[[i]])
-    qwts_icenu[[i]] <- uapply(qw_i, unstandardise_qwts, 0, t_icenu[[i]])
-    qwts_delay[[i]] <- uapply(qw_i, unstandardise_qwts, 0, t_delay[[i]])
-  }
-  
-  
-  eids_event <- ids[event]
-  qids_event <- rep(ids[event],   times = qnodes)
-  qids_lcens <- rep(ids[lcens],   times = qnodes)
-  qids_rcens <- rep(ids[rcens],   times = qnodes)
-  qids_icens <- rep(ids[icens],   times = qnodes)
-  qids_delay <- rep(ids[delayed], times = qnodes)
-  
-  # times at events and all quadrature points
-  cids <- c(eids_event,
-            qids_event,
-            qids_lcens,
-            qids_rcens,
-            qids_icens,
-            qids_icens,
-            qids_delay)
-  cpts_list <- list(t_event,
-                    qpts_event,
-                    qpts_lcens,
-                    qpts_rcens,
-                    qpts_icenl,
-                    qpts_icenu,
-                    qpts_delay)
-  idx_cpts <- get_idx_array(sapply(cpts_list, length))
-  cpts     <- unlist(cpts_list) # as vector for stan
-  len_cpts <- length(cpts)
-  
-  # number of quadrature points
-  qevent <- length(qwts_event)
-  qlcens <- length(qwts_lcens)
-  qrcens <- length(qwts_rcens)
-  qicens <- length(qwts_icenl)
-  qdelay <- length(qwts_delay)
-  
-  # basis terms for baseline hazard
-  basis_cpts <- make_basis(cpts, basehaz)
-  
-  # predictor matrices
-  x <- make_x(formula$tf_form, mf)$x
-  x_event <- keep_rows(x, d == 1)
-  x_lcens <- keep_rows(x, d == 2)
-  x_rcens <- keep_rows(x, d == 0)
-  x_icens <- keep_rows(x, d == 3)
-  x_delay <- keep_rows(x, delayed)
-  K <- ncol(x)
-  x_cpts <- rbind(x_event,
-                  rep_rows(x_event, times = qnodes),
-                  rep_rows(x_lcens, times = qnodes),
-                  rep_rows(x_rcens, times = qnodes),
-                  rep_rows(x_icens, times = qnodes),
-                  rep_rows(x_delay, times = qnodes))
-  
-  # fit a cox model
-  if (formula$surv_type %in% c("right", "counting")) {
-    mod <- survival::coxph(formula$formula, data = data, x = TRUE)
-  } else if (formula$surv_type %in% c("interval", "interval2")) {
-    mod <- survival::survreg(formula$formula, data = data, x = TRUE)
-  } else {
-    stop("Bug found: Invalid Surv type.")
-  }
-  
-  # calculate mean log incidence, used as a shift in log baseline hazard
-  norm_const <- log(nevent / sum(eventtime - entrytime))
-  
-  # get time start for initial, intermidiate and absorving states
-  t_state = data[ ,time_start]
-  
-  nlist(mod,
-        surv_type = formula$surv_type,
-        qnodes,
-        basehaz,
-        has_intercept,
-        has_icens = as.logical(nicens),
-        model_frame = mf,
-        entrytime,
-        eventtime,
-        d, status,
-        norm_const,
-        t_beg,
-        t_end,
-        t_upp,
-        t_event,
-        t_rcens,
-        t_lcens,
-        t_icenl,
-        t_icenu,
-        t_delay,
-        t_state,
-        time_start,
-        nevent,
-        nlcens,
-        nrcens,
-        nicens,
-        ndelay,
-        qevent,
-        qlcens,
-        qrcens,
-        qicens,
-        qdelay,
-        cids,
-        cpts,
-        len_cpts,
-        idx_cpts,
-        qwts_event,
-        qwts_lcens,
-        qwts_rcens,
-        qwts_icenl,
-        qwts_icenu,
-        qwts_delay,
-        eids_event,
-        qids_event,
-        qids_lcens,
-        qids_rcens,
-        qids_icens,
-        qids_delay,
-        x,
-        x_cpts,
-        basis_cpts,
-        x_bar = colMeans(x),
-        K)
-}
 
 # Construct a list with information about the baseline hazard
 #
@@ -2506,243 +1864,6 @@ get_extra_grp_info <- function(basic_info, flist, id_var, grp_assoc,
 
 
 
-# Return design matrices for evaluating longitudinal submodel quantities
-# at specified quadrature points/times
-#
-# @param data A data frame, the data for the longitudinal submodel.
-# @param assoc A list with information about the association structure for
-#   the one longitudinal submodel.
-# @param y_mod A named list returned by a call to handle_y_mod (the
-#   fit for a single longitudinal submodel)
-# @param grp_stuff A list with information about any lower level grouping
-#   factors that are clustered within patients and how to handle them in
-#   the association structure.
-# @param ids,times The subject IDs and times vectors that correspond to the
-#   event and quadrature times at which the design matrices will
-#   need to be evaluated for the association structure.
-# @param id_var The name on the ID variable.
-# @param time_var The name of the time variable.
-# @param epsilon The half-width of the central difference used for
-#   numerically calculating the derivative of the design matrix for slope
-#   based association structures.
-# @param auc_qnodes Integer specifying the number of GK quadrature nodes to
-#   use in the integral/AUC based association structures.
-# @return The list returned by make_assoc_parts.
-handle_assocmod2 <- function(data, assoc, y_mod, e_mod, grp_stuff, meta, j) {
-  
-  
-  if (!requireNamespace("dplyr"))
-    stop("the 'dplyr' package must be installed to use this function")
-  
-  if (!requireNamespace("data.table"))
-    stop2("the 'data.table' package must be installed to use this function.")
-  
-  id_var   <- meta$id_var
-  time_var <- meta$time_var
-  
-  # before turning data into a data.table (for a rolling merge against
-  # the quadrature points) we want to make sure that the data does not
-  # include any NAs for the predictors or assoc formula variables
-  tt <- attr(y_mod$terms, "term.labels")
-  tt <- c(tt, uapply(assoc[["which_formulas"]], all.vars))
-  fm <- reformulate(tt, response = NULL)
-  df <- get_all_vars(fm, data)
-  df <- df[complete.cases(df), , drop = FALSE]
-  
-  #df <- df[e_mod$assoc_obs, ]
-  keep_ids <- grep(id_var, colnames(df), value = TRUE)
-  ids <- df[[keep_ids]]
-  df[[keep_ids]] <- as.integer(as.factor(df[[keep_ids]]))
-  # declare df as a data.table for merging with quadrature points
-  dt <- prepare_data_table(df,
-                           id_var   = id_var,
-                           time_var = time_var,
-                           grp_var  = grp_stuff$grp_var) # grp_var may be NULL
-  
-  
-  
-  # design matrices for calculating association structure based on
-  # (possibly lagged) eta, slope, auc and any interactions with data
-  args <- list(use_function = make_assoc_parts_for_stan,
-               newdata      = dt,
-               y_mod        = y_mod,
-               grp_stuff    = grp_stuff,
-               meta         = meta,
-               assoc        = assoc,
-               ids          = e_mod$cids_a,
-               times        = e_mod$cpts_a,
-               j            = j)
-  
-  do.call(make_assoc_parts2, args)
-}
-
-# Function to construct quantities, primarily design matrices (x, Zt), that
-# will be used to evaluate the longitudinal submodel contributions to the
-# association structure in the event submodel. For example, the design matrices
-# evaluated at the quadpoints, quadpoints + eps, lagged quadpoints, auc quadpoints,
-# and so on. Exactly what quantities are returned depends on what is specified
-# in the use_function argument.
-#
-# @param use_function The function to call which will return the design
-#   matrices for eta, eps, lag, auc, etc. Generally either
-#   'make_assoc_parts_for_stan' or 'pp_data'.
-# @param newdata A model frame used for constructing the design matrices
-# @param assoc A list with information about the association structure for
-#   the one longitudinal submodel.
-# @param grp_stuff A list with information about any lower level grouping
-#   factors that are clustered within patients and how to handle them in
-#   the association structure.
-# @param ids,times The subject IDs and times vectors that correspond to the
-#   event/censoring and quadrature times at which the design matrices will
-#   need to be evaluated for the association structure.
-# @param id_var The name on the ID variable.
-# @param time_var The name of the time variable.
-# @param epsilon The half-width of the central difference used for
-#   numerically calculating the derivative of the design matrix for slope
-#   based association structures.
-# @param auc_qnodes Integer specifying the number of GK quadrature nodes to
-#   use in the integral/AUC based association structures.
-# @param ... Additional arguments passes to use_function
-# @return A named list
-make_assoc_parts2 <- function(use_function = make_assoc_parts_for_stan,
-                              newdata, assoc, grp_stuff, meta_stuff,
-                              ids, times, j, ...) {
-  
-  if (!requireNamespace("data.table"))
-    stop("the 'data.table' package must be installed to use this function")
-  
-  id_var     <- meta_stuff$id_var
-  time_var   <- meta_stuff$time_var
-  epsilon    <- meta_stuff$epsilon
-  auc_qnodes <- meta_stuff$auc_qnodes[j]
-  
-  eps_uses_derivative_of_x <- TRUE # experimental
-  
-  # Apply lag
-  lag <- assoc[["which_lag"]]
-  if (!lag == 0)
-    times <- set_lag(times, lag)
-  
-  # Broadcast ids and times if there is lower level clustering
-  if (grp_stuff$has_grp) {
-    # grps corresponding to each id
-    grps <- as.vector(unlist(grp_stuff$grp_list[as.character(ids)]))
-    # freq by which to expand each ids and times element
-    freq_seq <- grp_stuff$grp_freq[as.character(ids)]
-    # rep each patient id and prediction time the required num of times
-    ids   <- rep(ids,   freq_seq)
-    times <- rep(times, freq_seq)
-    # indices for collapsing across clusters within patients
-    grp_idx <- get_idx_array(freq_seq)
-  } else grps <- grp_idx <- NULL
-  
-  # Identify row in longitudinal data closest to event time or quadrature point
-  #   NB if the quadrature point is earlier than the first observation time,
-  #   then covariates values are carried back to avoid missing values.
-  #   In any other case, the observed covariates values from the most recent
-  #   observation time preceeding the quadrature point are carried forward to
-  #   represent the covariate value(s) at the quadrature point. (To avoid
-  #   missingness there is no limit on how far forwards or how far backwards
-  #   covariate values can be carried). If no time varying covariates are
-  #   present in the longitudinal submodel (other than the time variable)
-  #   then nothing is carried forward or backward.
-  
-  dataQ <- rolling_merge(data = newdata, ids = ids, times = times, grps = grps)
-  
-  dataQ <- handle_quadratic(dataQ, time_var)
-  dataQ <- handle_cubic(dataQ, time_var)
-  
-  mod_eta <- use_function(newdata = dataQ, ...)
-  
-  # If association structure is based on slope, then calculate design
-  # matrices under a time shift of epsilon
-  sel_slope <- grep("etaslope", names(assoc))
-  if (any(unlist(assoc[sel_slope]))) {
-    if (eps_uses_derivative_of_x) {
-      # slope is evaluated by passing Stan the derivatives of the X and Z
-      # design matrices directly, each evaluated using central differences
-      # with a half-width equal to epsilon
-      dataQ_pos <- dataQ_neg <- dataQ
-      dataQ_neg[[time_var]] <- dataQ_neg[[time_var]] - epsilon
-      dataQ_pos[[time_var]] <- dataQ_pos[[time_var]] + epsilon
-      mod_neg <- use_function(newdata = dataQ_neg, ...)
-      mod_pos <- use_function(newdata = dataQ_pos, ...)
-      mod_eps <- mod_pos
-      mod_eps$x     <- (mod_pos$x     - mod_neg$x    ) / (2 * epsilon) # derivative of x
-      mod_eps$xtemp <- (mod_pos$xtemp - mod_neg$xtemp) / (2 * epsilon) # derivative of centered x?
-      mod_eps$z <- xapply(mod_pos$z, mod_neg$z,                        # derivative of z
-                          FUN = function(x, y) (x - y) / (2 * epsilon))
-      if (!is.null(mod_eps$Zt))
-        mod_eps$Zt <- (mod_pos$Zt - mod_neg$Zt) / (2 * epsilon)
-    } else {
-      # slope is evaluated by passing Stan the X and Z design matrices under
-      # a time shift of epsilon and then evaluating the derivative of the
-      # linear predictor in Stan using a one-sided difference
-      dataQ_eps <- dataQ
-      dataQ_eps[[time_var]] <- dataQ_eps[[time_var]] + epsilon
-      mod_eps <- use_function(newdata = dataQ_eps, ...)
-    }
-  } else mod_eps <- NULL
-  
-  # If association structure is based on area under the marker trajectory, then
-  # calculate design matrices at the subquadrature points
-  sel_auc <- grep("etaauc|muauc", names(assoc))
-  if (any(unlist(assoc[sel_auc]))) {
-    if (grp_stuff$has_grp)
-      stop2("'etaauc' and 'muauc' not yet implemented when there is a grouping ",
-            "factor clustered within patients.")
-    # Return a design matrix that is (qnodes * auc_qnodes * Npat) rows
-    auc_qpts <- uapply(times, function(x)
-      lapply(get_quadpoints(auc_qnodes)$points, unstandardise_qpts, 0, x))
-    auc_qwts <- uapply(times, function(x)
-      lapply(get_quadpoints(auc_qnodes)$weights, unstandardise_qwts, 0, x))
-    ids2 <- rep(ids, each = auc_qnodes)
-    dataQ_auc <- rolling_merge(data = newdata, ids = ids2, times = auc_qpts)
-    mod_auc <- use_function(newdata = dataQ_auc, ...)
-  } else mod_auc <- auc_qpts <- auc_qwts <- NULL
-  
-  # If association structure is based on interactions with data, then calculate
-  # the design matrix which will be multiplied by etavalue, etaslope, muvalue or muslope
-  sel_data <- grep("_data", names(assoc), value = TRUE)
-  X_data <- xapply(sel_data, FUN = function(i) {
-    form <- assoc[["which_formulas"]][[i]]
-    if (length(form)) {
-      form <- as.formula(form)
-      vars <- rownames(attr(terms.formula(form), "factors"))
-      if (is.null(vars))
-        stop2("No variables found in the formula for the '", i, "' association structure.")
-      sel <- which(!vars %in% colnames(dataQ))
-      if (length(sel))
-        stop2("The following variables were specified in the formula for the '", i,
-              "' association structure, but they cannot be found in the data: ",
-              paste0(vars[sel], collapse = ", "))
-      mf <- stats::model.frame(form, data = dataQ)
-      X <- stats::model.matrix(form, data = mf)
-      X <- drop_intercept(X)
-      if (!ncol(X))
-        stop2("Bug found: A formula was specified for the '", i, "' association ",
-              "structure, but the resulting design matrix has no columns.")
-    } else {
-      X <- matrix(0, nrow(dataQ), 0)
-    }
-    X
-  })
-  K_data <- sapply(X_data, ncol)
-  X_bind_data <- do.call(cbind, X_data)
-  
-  ret <- nlist(times, mod_eta, mod_eps, mod_auc, K_data, X_data, X_bind_data, grp_stuff)
-  
-  structure(ret,
-            times      = times,
-            lag        = lag,
-            epsilon    = epsilon,
-            grp_idx    = grp_idx,
-            auc_qnodes = auc_qnodes,
-            auc_qpts   = auc_qpts,
-            auc_qwts   = auc_qwts,
-            eps_uses_derivative_of_x = eps_uses_derivative_of_x)
-}
-
 # Return design matrices for the longitudinal submodel. This is
 # designed to generate the design matrices evaluated at the GK
 # quadrature points, because it uses a 'terms' object to generate
@@ -2971,7 +2092,7 @@ get_prefit_inits_idm <- function(init_fit, ms_mod, transitions, assoc_ids_l, pri
   
   init_means <- rstan::get_posterior_mean(init_fit)
   init_nms   <- rownames(init_means)
-  inits <- uapply(seq_along(transitions), function(i){
+  inits <- nonrecuapply(seq_along(transitions), function(i){
     e_mod <- ms_mod[[i]]
     prior_stuff <- prior_stuff_l[[i]]
     prior_aux_stuff <- prior_aux_stuff_l[[i]]
@@ -2979,7 +2100,6 @@ get_prefit_inits_idm <- function(init_fit, ms_mod, transitions, assoc_ids_l, pri
     
     generate_init_function_idm(e_mod, prior_stuff, prior_aux_stuff, transition)()
   })
-  inits <- lapply(inits, aa)
   
   sel_b1 <- grep(paste0("^z_bMat1\\."), init_nms)
   if (length(sel_b1))
@@ -3032,10 +2152,10 @@ generate_init_function_idm <- function(e_mod_stuff, prior_stuff, prior_aux_stuff
   e_aux <- if (e_mod_stuff$basehaz$type == 1L) runif(1, 0.5, 3) else rep(0, e_mod_stuff$basehaz$nvars)
   e_z_beta       <- standardise_coef(x        = e_beta,
                                      location = prior_stuff$prior_mean,
-                                     scale    = prior_stuff$e_prior_scale)
+                                     scale    = prior_stuff$prior_scale)
   e_aux_unscaled <- standardise_coef(x        = e_aux,
-                                     location = prior_aux_stuff$prior_mean_for_aux,
-                                     scale    = prior_aux_stuff$prior_scale_for_aux)
+                                     location = prior_aux_stuff$prior_mean,
+                                     scale    = prior_aux_stuff$prior_scale)
   
   # Function to generate model based initial values
   model_based_inits <- rm_null(list(
@@ -3044,6 +2164,23 @@ generate_init_function_idm <- function(e_mod_stuff, prior_stuff, prior_aux_stuff
     e_gamma        = array_else_double(rep(0, e_mod_stuff$has_intercept))))
   
   names(model_based_inits) <- paste0(names(model_based_inits), transition)
+  if(!is.null(model_based_inits$e_z_beta)){
+    if(length(model_based_inits$e_z_beta) > 1){
+      names(model_based_inits[[paste0("e_z_beta",transition)]]) <- paste0("e_z_beta",transition, ".", seq_along(model_based_inits$e_z_beta))
+    } 
+  }
+  
+  if(!is.null(model_based_inits$e_aux_unscaled)){
+    if(length(model_based_inits$e_aux_unscaled) > 1){
+    names(model_based_inits[[paste0("e_aux_unscaled",transition)]]) <- paste0("e_aux_unscaled",transition, ".", seq_along(model_based_inits$e_aux_unscaled))
+    }
+  } 
+  
+  if(!is.null(model_based_inits$e_gamma)){
+    if(length(model_based_inits$e_gamma) > 1){
+      names(model_based_inits[[paste0("e_gamma",transition)]]) <- paste0("e_gamma",transition, ".", seq_along(model_based_inits$e_gamma))
+    } 
+  }
   
   return(function() model_based_inits)
 }
@@ -3393,7 +2530,7 @@ get_element <- function(parts, m = 1, which = "eta", ...) {
         stop2("Bug found: beta and b must be provided to build the ",
               "linear predictor for '", which, "'.")
       
-      eta <- linear_predictor(beta, x)
+      eta <- linear_predictor(ulist(beta), x)
       if (NCOL(b) == 1) {
         eta <- eta + as.vector(b %*% Zt)
       } else {

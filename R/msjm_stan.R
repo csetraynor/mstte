@@ -542,8 +542,7 @@ msjm_stan <- function(formulaLong,
     stop("the 'survival' package must be installed to use this function.")
   
   algorithm <- match.arg(algorithm)
-  formulaMs <- validate_arg(formulaMs, type = "formula")
-  
+
   if (missing(basehaz_ops)) basehaz_ops <- NULL
   if (missing(weights))     weights     <- NULL
   if (missing(id_var))      id_var      <- NULL
@@ -562,6 +561,7 @@ msjm_stan <- function(formulaLong,
     stop("'time_var' must be specified.")
   
   # Formula
+  formulaMs <- validate_arg(formulaMs, type = "formula")
   formulaLong <- validate_arg(formulaLong, "formula"); M <- length(formulaLong)
   if (M > 3L)
     stop("'msjm_stan' is currently limited to a maximum of 3 longitudinal outcomes.")
@@ -1000,15 +1000,13 @@ msjm_stan <- function(formulaLong,
   if (is_msjm) { # begin msjm block
     
     # fit separate event submodel
-    # ms_mod <-  handle_ms_mod(formula = formulaMs,
-    #                          data    = dataMs,
-    #                          meta    = meta)
+
     # Handle time start
     t_start <- lapply(dataMs, function(d) handle_timestart(d, time_start))
     
-    ms_mod <- mapply(FUN = handle_e_mod2,
+    ms_mod <- mapply(FUN = handle_ms_mod,
                      t_start = t_start,
-                     formula = formulaMs_p,
+                     formula = formulaMs,
                      data = dataMs,
                      qnodes = meta$qnodes,
                      basehaz = meta$basehaz,
@@ -1017,44 +1015,19 @@ msjm_stan <- function(formulaLong,
     
     meta$has_icens <- lapply(ms_mod, function(ms_mod) ms_mod$has_icens)
     
-    meta$id_state <- lapply(dataMs, function(x) extract_id(x, id_var))
+    meta$id_trans <- lapply(dataMs, function(x) extract_id(x, id_var))
+    
+    # error checks for the id variable
+    mapply(FUN = validate_msjm_ids, 
+           formula = formulaMs,
+           data = dataMs,
+           id_list = meta$id_trans,
+           MoreArgs = nlist(meta))
     
     # observation weights
     #e_weights <- handle_weights(e_mod, weights, id_var)
     
-    assoc_obs <- lapply(seq_len(M), function(m)
-      mapply(FUN = assoc_time,
-             mod = ms_mod,
-             id_state = meta$id_state,
-             MoreArgs = nlist(x = dataLong[[m]],
-                              t_var = time_var)
-             ))
-    
-    for(j in seq_len(n_trans)){
-      ms_mod[[j]]$assoc_obs <- assoc_obs[[1]][[j]]
-    }
-    
-    # check longitudinal observation times are not later than the event time
-    for(j in seq_len(n_trans)){
-      if(is.data.frame(dataLong)){
-        validate_observation_times(
-          data = dataLong[assoc_obs[[m]][[j]], ],
-          exittime = ms_mod[[j]]$t_end + t_start[[j]],
-          id_var     = id_var,
-          time_var   = time_var
-        )
-      } else {
-        lapply(seq_len(M), function(m){
-          validate_observation_times(
-            data = dataLong[[m]][assoc_obs[[m]][[j]], ],
-            exittime = ms_mod[[j]]$t_end + t_start[[j]],
-            id_var     = id_var,
-            time_var   = time_var
-          )
-        })
-      }
-    }
-    
+
     #----------- Prior distributions -----------#
     
     # valid prior distributions
@@ -1085,7 +1058,7 @@ msjm_stan <- function(formulaLong,
       lapply(seq_len(n_trans), function(j) handle_glm_prior(
         priorMs_aux[[j]],
         nvars = ms_mod[[j]]$basehaz$nvars,
-        default_scale = get_default_aux_scale(basehaz[[j]]),
+        default_scale = get_default_aux_scale(ms_mod[[j]]$basehaz),
         link = NULL,
         ok_dists = ok_dists_e_aux)
       )
@@ -1338,38 +1311,110 @@ msjm_stan <- function(formulaLong,
       validate_assoc_with_grp(grp_stuff, assoc, ok_assoc_with_grp)
     
     # design matrices for longitudinal submodel at the quadrature points
-    auc_qnodes <- meta$auc_qnodes <- maybe_broadcast(15L, n_trans)
-    a_mod <- list()
+    auc_qnodes <- meta$auc_qnodes
     
-    for(j in (seq_len(n_trans))){
-      if(is.data.frame(dataLong)){
-        a_mod[[j]] <- lapply(seq_len(M), function(m){
+    if(M > 1){
+      assoc_obs <- lapply(dataLong, function(M){
+        mapply(FUN = assoc_obstime,
+               e_mod = ms_mod,
+               id_trans = meta$id_trans,
+               MoreArgs = nlist(long = M,
+                                meta), SIMPLIFY = FALSE )
+      })
+      
+    } else if (is.data.frame(dataLong)){
+      assoc_obs <-  mapply(FUN = assoc_obstime,
+                           e_mod = ms_mod,
+                           id_trans = meta$id_trans,
+                           MoreArgs = nlist(long = dataLong,
+                                            meta), SIMPLIFY = FALSE ) 
+    } else {
+      assoc_obs <-  mapply(FUN = assoc_obstime,
+                           e_mod = ms_mod,
+                           id_trans = meta$id_trans,
+                           MoreArgs = nlist(long = dataLong[[1]],
+                                            meta), SIMPLIFY = FALSE )
+    }
+    
+    # check longitudinal observation times are not later than the event time
+    if(M > 1){
+      lapply(seq_len(M), function(m){
+        mapply(FUN = validate_observation_mstimes,
+               assoc_obs = assoc_obs[[m]],
+               mod = ms_mod,
+               MoreArgs = nlist(
+                 id_var     = meta$id_var,
+                 time_var   = meta$time_var,
+                 data = dataLong[[m]]
+               ))})
+    } else if(is.data.frame(dataLong)) {
+      mapply(FUN = validate_observation_mstimes,
+             assoc_obs = assoc_obs,
+             mod = ms_mod,
+             MoreArgs = nlist(
+               id_var     = meta$id_var,
+               time_var   = meta$time_var,
+               data = dataLong
+             ))
+    } else {
+      mapply(FUN = validate_observation_mstimes,
+             assoc_obs = assoc_obs,
+             mod = ms_mod,
+             MoreArgs = nlist(
+               id_var     = meta$id_var,
+               time_var   = meta$time_var,
+               data = dataLong[[1]]
+             ))
+    }
+    
+    if(M > 1){
+      a_mod <- lapply(seq_len(n_trans), function(n){
+        lapply(seq_len(M), function(m){
           handle_assocmod2(
-            data = dataLong[assoc_obs[[m]][[j]], ],
-            assoc     = apply(assoc, 2L, c)[[m]], # converts array to list
+           # assoc_obs = assoc_obs[[m]][[n]],
+            e_mod = ms_mod[[n]],
+            assoc     = apply(assoc, 2L, c)[[m]], # converts array to list 
+            data = dataLong[[m]],
             y_mod     = y_mod[[m]],
             grp_stuff = grp_stuff[[m]],
-            e_mod = ms_mod[[j]],
-            meta = meta,
-            j = j)
-        })
-      } else {
-        a_mod[[j]] <- lapply(seq_len(M), function(m){
-          handle_assocmod2(
-            data = dataLong[[m]][assoc_obs[[m]][[j]], ],
-            assoc     = apply(assoc, 2L, c)[[m]], # converts array to list
-            y_mod     = y_mod[[m]],
-            grp_stuff = grp_stuff[[m]],
-            e_mod = ms_mod[[j]],
-            meta = meta,
-            j = j
+            meta = meta
           )
         })
-      }
+      })
+    } else if(is.data.frame(dataLong)){
+      a_mod <- lapply(seq_len(n_trans), function(n){
+        lapply(seq_len(M), function(m){
+          handle_assocmod2(
+           # assoc_obs = assoc_obs[[n]],
+            e_mod = ms_mod[[n]],
+            assoc     = apply(assoc, 2L, c)[[m]], # converts array to list 
+            data = dataLong,
+            y_mod     = y_mod[[m]],
+            grp_stuff = grp_stuff[[m]],
+            meta = meta
+          )
+        })
+      })
+    } else {
+      a_mod <- lapply(seq_len(n_trans), function(n){
+        mapply(FUN = handle_assocmod2,
+               assoc     = apply(assoc, 2L, c), # converts array to list
+               data = dataLong,
+               y_mod     = y_mod,
+               grp_stuff = grp_stuff,
+               MoreArgs = nlist(
+               #  assoc_obs = assoc_obs[[n]],
+                 assoc_ids = meta$id_trans[[n]],
+                 e_mod = ms_mod[[n]],
+                 
+                 meta = meta
+               ), SIMPLIFY = FALSE
+          )
+        })
     }
     
     # number of association parameters
-    a_K <- lapply(a_mod, function(a_mod) get_num_assoc_pars(assoc, a_mod))
+    a_K <- lapply(a_mod, function(a) get_num_assoc_pars(a_mod_stuff = a, assoc = assoc))
     
     # use a stan_mvmer variational bayes model fit for:
     # - obtaining initial values for joint model parameters
@@ -1392,15 +1437,8 @@ msjm_stan <- function(formulaLong,
                       y_nms_sigma,
                       y_nms_ppd,
                       "log-posterior")
-    
-    
-    
-    assoc_ids <- lapply(seq_len(n_trans), function(j)
-      mapply( FUN = assoc_id,
-              longdata = dataLong,
-              MoreArgs = nlist(
-                msdata = dataMs[[j]],
-                id_var)) )
+
+    assoc_ids <- meta$id_trans
     
     init_fit  <- replace_stanfit_nms(init_fit, init_nms_all)
     init_mat  <- t(colMeans(am(init_fit))) # posterior means
@@ -1435,7 +1473,7 @@ msjm_stan <- function(formulaLong,
     # Priors for association parameters
     e_user_prior_assoc_stuff <- e_prior_assoc_stuff <-
       mapply( FUN = handle_glm_prior,
-              prior = priorEvent_assoc,
+              prior = priorMs_assoc,
               nvars = a_K,
               MoreArgs = nlist(default_scale = 2.5,
                                link          = NULL,
@@ -1445,7 +1483,7 @@ msjm_stan <- function(formulaLong,
     
     # Autoscaling of priors
     e_prior_assoc_stuff <- mapply(
-      FUN = autoscale_prior2,
+      FUN = autoscale_prior_assoc,
       a_k = a_K,
       prior_stuff = e_prior_assoc_stuff,
       parts  = a_mod,
@@ -1454,9 +1492,8 @@ msjm_stan <- function(formulaLong,
         family,
         assoc,
         beta   = init_beta
-      )
+      ), SIMPLIFY = FALSE
     )
-    
     
     #----------- Data for export to Stan -----------#
     
@@ -1516,44 +1553,48 @@ msjm_stan <- function(formulaLong,
     standata <- standata_add_assoc_extras12(standata, a_mod = a_mod[[3]], assoc = assoc)
     
     # hyperparameters for assoc parameter priors
-    standata$a_prior_dist01         <- e_prior_assoc_stuff[,1]$prior_dist
-    standata$a_prior_mean01          <- e_prior_assoc_stuff[,1]$prior_mean
-    standata$a_prior_scale01         <- aa(e_prior_assoc_stuff[,1]$prior_scale)
-    standata$a_prior_df01            <- e_prior_assoc_stuff[,1]$prior_df
-    standata$a_global_prior_scale01  <- e_prior_assoc_stuff[,1]$global_prior_scale
-    standata$a_global_prior_df01     <- e_prior_assoc_stuff[,1]$global_prior_df
-    standata$a_slab_df01             <- e_prior_assoc_stuff[,1]$slab_df
-    standata$a_slab_scale01          <- e_prior_assoc_stuff[,1]$slab_scale
+    standata$a_prior_dist01         <- e_prior_assoc_stuff[[1]]$prior_dist
+    standata$a_prior_mean01          <- e_prior_assoc_stuff[[1]]$prior_mean
+    standata$a_prior_scale01         <- aa(e_prior_assoc_stuff[[1]]$prior_scale)
+    standata$a_prior_df01            <- e_prior_assoc_stuff[[1]]$prior_df
+    standata$a_global_prior_scale01  <- e_prior_assoc_stuff[[1]]$global_prior_scale
+    standata$a_global_prior_df01     <- e_prior_assoc_stuff[[1]]$global_prior_df
+    standata$a_slab_df01             <- e_prior_assoc_stuff[[1]]$slab_df
+    standata$a_slab_scale01          <- e_prior_assoc_stuff[[1]]$slab_scale
     
     # centering for association terms
-    standata$a_xbar01  <- if (a_K[[1]]) e_prior_assoc_stuff[,1]$a_xbar else numeric(0)
+    standata$a_xbar01  <- if (a_K[[1]]) e_prior_assoc_stuff[[1]]$a_xbar else numeric(0)
     
     # second
-    standata$a_prior_dist02         <- e_prior_assoc_stuff[,2]$prior_dist
-    standata$a_prior_mean02          <- e_prior_assoc_stuff[,2]$prior_mean
-    standata$a_prior_scale02         <- aa(e_prior_assoc_stuff[,2]$prior_scale)
-    standata$a_prior_df02            <- e_prior_assoc_stuff[,2]$prior_df
-    standata$a_global_prior_scale02  <- e_prior_assoc_stuff[,2]$global_prior_scale
-    standata$a_global_prior_df02     <- e_prior_assoc_stuff[,2]$global_prior_df
-    standata$a_slab_df02             <- e_prior_assoc_stuff[,2]$slab_df
-    standata$a_slab_scale02          <- e_prior_assoc_stuff[,2]$slab_scale
+    standata$a_prior_dist02         <- e_prior_assoc_stuff[[2]]$prior_dist
+    standata$a_prior_mean02          <- e_prior_assoc_stuff[[2]]$prior_mean
+    standata$a_prior_scale02         <- aa(e_prior_assoc_stuff[[2]]$prior_scale)
+    standata$a_prior_df02            <- e_prior_assoc_stuff[[2]]$prior_df
+    standata$a_global_prior_scale02  <- e_prior_assoc_stuff[[2]]$global_prior_scale
+    standata$a_global_prior_df02     <- e_prior_assoc_stuff[[2]]$global_prior_df
+    standata$a_slab_df02             <- e_prior_assoc_stuff[[2]]$slab_df
+    standata$a_slab_scale02          <- e_prior_assoc_stuff[[2]]$slab_scale
     
     # centering for association terms
-    standata$a_xbar02  <- if (a_K[[2]]) e_prior_assoc_stuff[,2]$a_xbar else numeric(0)
+    standata$a_xbar02  <- if (a_K[[2]]) e_prior_assoc_stuff[[2]]$a_xbar else numeric(0)
     
     # third
-    standata$a_prior_dist12         <- e_prior_assoc_stuff[,3]$prior_dist
-    standata$a_prior_mean12          <- e_prior_assoc_stuff[,3]$prior_mean
-    standata$a_prior_scale12         <- aa(e_prior_assoc_stuff[,3]$prior_scale)
-    standata$a_prior_df12            <- e_prior_assoc_stuff[,3]$prior_df
-    standata$a_global_prior_scale12  <- e_prior_assoc_stuff[,3]$global_prior_scale
-    standata$a_global_prior_df12     <- e_prior_assoc_stuff[,3]$global_prior_df
-    standata$a_slab_df12             <- e_prior_assoc_stuff[,3]$slab_df
-    standata$a_slab_scale12          <- e_prior_assoc_stuff[,3]$slab_scale
+    standata$a_prior_dist12         <- e_prior_assoc_stuff[[3]]$prior_dist
+    standata$a_prior_mean12          <- e_prior_assoc_stuff[[3]]$prior_mean
+    standata$a_prior_scale12         <- aa(e_prior_assoc_stuff[[3]]$prior_scale)
+    standata$a_prior_df12            <- e_prior_assoc_stuff[[3]]$prior_df
+    standata$a_global_prior_scale12  <- e_prior_assoc_stuff[[3]]$global_prior_scale
+    standata$a_global_prior_df12     <- e_prior_assoc_stuff[[3]]$global_prior_df
+    standata$a_slab_df12             <- e_prior_assoc_stuff[[3]]$slab_df
+    standata$a_slab_scale12          <- e_prior_assoc_stuff[[3]]$slab_scale
     
     # centering for association terms
-    standata$a_xbar12  <- if (a_K[[3]]) e_prior_assoc_stuff[,3]$a_xbar else numeric(0)
+    standata$a_xbar12  <- if (a_K[[3]]) e_prior_assoc_stuff[[3]]$a_xbar else numeric(0)
     
+    # provisional patch
+    standata$auc_qnodes02 <- 15L
+    standata$auc_qnodes12 <- 15L
+
   } # end msjm block
   
   #---------------
@@ -1598,6 +1639,32 @@ msjm_stan <- function(formulaLong,
   #     family                              = family)
   # }
   
+  
+  # prior_long <- summarize_jm_prior(
+  #   user_priorLong                      = y_user_prior_stuff,
+  #   user_priorLong_intercept            = y_user_prior_intercept_stuff,
+  #   user_priorLong_aux                  = y_user_prior_aux_stuff,
+  #   user_prior_covariance               = prior_covariance,
+  #   y_has_intercept                     = fetch_(y_mod, "x", "has_intercept"),
+  #   y_has_predictors                    = fetch_(y_mod, "x", "K") > 0,
+  #   adjusted_priorLong_scale            = fetch(y_prior_stuff, "prior_scale"),
+  #   adjusted_priorLong_intercept_scale  = fetch(y_prior_intercept_stuff, "prior_scale"),
+  #   family                              = family)
+  
+  prior_info <- lapply(seq_len(n_trans), function(k)
+    summarize_jm_prior(
+      user_priorEvent           = ms_prior_stuff[[k]],
+      user_priorEvent_intercept = ms_prior_intercept_stuff[[k]],
+      user_priorEvent_aux       = ms_prior_aux_stuff[[k]],
+      adjusted_priorEvent_scale           = ms_prior_stuff[[k]]$prior_scale,
+      adjusted_priorEvent_intercept_scale = ms_prior_intercept_stuff[[k]]$prior_scale,
+      adjusted_priorEvent_aux_scale       = ms_prior_aux_stuff[[k]]$prior_scale,
+      e_has_intercept  = ms_mod[[k]]$has_intercept,
+      e_has_predictors = ms_mod[[k]]$K > 0,
+      basehaz = ms_mod[[k]]$basehaz
+    )
+  )
+  
   #-----------
   # Fit model
   #-----------
@@ -1630,7 +1697,6 @@ msjm_stan <- function(formulaLong,
       user_max_treedepth = max_treedepth,
       show_messages = FALSE)
     stanfit <- do.call(rstan::sampling, args)
-    return(stanfit)
   } else { # meanfield or fullrank vb
     args <- nlist(
       object = stanfit,
@@ -1696,7 +1762,7 @@ msjm_stan <- function(formulaLong,
                        y_nms_ppd, 
                        "log-posterior"
                       ) )
-  
+
   # substitute new parameter names into 'stanfit' object
   stanfit <- replace_stanfit_nms(stanfit, nms_all)
   
@@ -1708,7 +1774,7 @@ msjm_stan <- function(formulaLong,
                 a_mod,
                 assoc,
                 basehaz,
-                prior_info = NULL, 
+                prior_info, 
                 id_var,
                 cnms, 
                 flevels,

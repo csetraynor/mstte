@@ -5,7 +5,9 @@
 #
 msjmstan <- function(object) {
   
-  opt        <- object$algorithm == "optimizing"
+  alg        <- object$algorithm
+  mcmc       <- alg == "sampling"
+  opt        <- alg == "optimizing"
   stanfit    <- object$stanfit
   M          <- object$M
   n_trans    <- object$n_trans
@@ -19,52 +21,28 @@ msjmstan <- function(object) {
   
   
   stan_summary <- make_stan_summary(stanfit)
-  nms <- c(stanfit@sim$fnames_oi)
-  coefs <- list()
-  ses <- list()
   
-  # Coefs and SEs for longitudinal submodel(s)                    
-  if (is_msjm) {
-    y_coefs <- lapply(1:M, function(m)
-      stan_summary[c(nms$y[[m]], nms$y_b[[m]]), select_median(object$algorithm)])
-    y_stanmat <- lapply(1:M, function(m) 
-      as.matrix(stanfit)[, c(nms$y[[m]], nms$y_b[[m]]), drop = FALSE])
-    y_ses <- lapply(y_stanmat, function(m) apply(m, 2L, mad))
-    y_covmat <- lapply(y_stanmat, cov)
-    for (m in 1:M) {
-      rownames(y_covmat[[m]]) <- colnames(y_covmat[[m]]) <- 
-        rownames(stan_summary)[c(nms$y[[m]], nms$y_b[[m]])]
-    }
-    # Remove padding
-    coefs[1:M] <- list_nms(lapply(y_coefs, unpad_reTrms.default), M, stub = stub)
-    ses[1:M]   <- list_nms(lapply(y_ses, unpad_reTrms.default), M, stub = stub)
-    
-  # Coefs and SEs for event submodel    
-    e_coefs <- stan_summary[c(nms$e, nms$a), select_median(object$algorithm)]        
-    if (length(e_coefs) == 1L) 
-      names(e_coefs) <- rownames(stan_summary)[c(nms$e, nms$a)[1L]]
-    e_stanmat <- as.matrix(stanfit)[, c(nms$e, nms$a), drop = FALSE]
-    e_ses <- apply(e_stanmat, 2L, mad)    
-    e_covmat <- cov(e_stanmat)
-    rownames(e_covmat) <- colnames(e_covmat) <- 
-      rownames(stan_summary)[c(nms$e, nms$a)]
-    coefs$Event <- e_coefs
-    ses$Event <- e_ses
-  }
+  # number of parameters
+  nvars  <- nrow(stan_summary)
   
-  # Covariance matrix for fixed effects                    
-  stanmat <- as.matrix(stanfit)[, c(nms$alpha, nms$beta), drop = FALSE]
+  # obtain medians
+  coefs     <- stan_summary[seq(nvars), select_median(alg)]
+  coefs_nms <- rownames(stan_summary)[seq(nvars)]
+  names(coefs) <- coefs_nms # ensure parameter names are retained
+  
+  # obtain standard errors and covariance matrix
+  stanmat <- as.matrix(stanfit)[, seq(nvars), drop = FALSE]
+  colnames(stanmat) <- coefs_nms
+  ses <- apply(stanmat, 2L, mad)
   covmat <- cov(stanmat)
   
-  if (object$algorithm == "sampling") { # for MCMC fits only
-    # Check Rhats for all parameters
-    check_rhats(stan_summary[, "Rhat"])    
-    # Run time (mins)
-    times <- round((rstan::get_elapsed_time(object$stanfit))/60, digits = 1)
-    times <- cbind(times, total = rowSums(times))      
-  } 
-  
-  out <- nlist(
+  # for mcmc only
+  if (mcmc) {
+    check_rhats(stan_summary[, "Rhat"])    # check rhats for all parameters
+    runtime <- get_runtime(object$stanfit) # run time (in mins)
+  }
+
+  structure( nlist(
     formula       = list_nms(object$formula, M, stub),
     terms         = list_nms(object$terms, M, stub),
     coefficients  = coefs, 
@@ -75,42 +53,25 @@ msjmstan <- function(object) {
     algorithm     = object$algorithm,
     call          = object$call,
     stan_function = object$stan_function,
-    runtime       = if (object$algorithm == "sampling") times else NULL,
+    cnms      = object$cnms,
+    flevels   = object$flevels,
+    n_markers = object$M,
+    n_grps    = object$n_grps,
+    n_yobs    = list_nms(object$n_yobs, M, stub),
+    family    = list_nms(object$family, M, stub),
+    glmod     = list_nms(object$glmod, M, stub),
+    dataLong  = object$dataLong, 
+    dataMs    = object$dataMs,
+    n_trans   = object$n_trans,
+    transition_labels = object$transition_labels,
+    ms_mod    = object$msmod,
+    a_mod     = object$assocmod,
+    glmod     = object$glmod,
+    runtime       = if (object$algorithm == "sampling") runtime else NULL,
     rstan_version    = utils::packageVersion("rstan"),
-    rstanarm_version = utils::packageVersion("rstanarm"),
+   # mstte_version = utils::packageVersion("mstte"),
     stan_summary, stanfit
-  )
-  if (is_mvmer) {
-    out$cnms      <- object$cnms
-    out$flevels   <- object$flevels
-    out$n_markers <- object$M
-    out$n_grps    <- object$n_grps
-    out$n_yobs    <- list_nms(object$n_yobs, M, stub)
-    out$family    <- list_nms(object$family, M, stub)
-    out$glmod     <- list_nms(object$glmod, M, stub)
-    out$data      <- if (!is_jm) list_nms(object$data, M, stub) else NULL
-    classes <- c("stanmvreg", "stanreg", "lmerMod")
-  }
-  if (is_jm) {
-    out$id_var    <- object$id_var
-    out$time_var  <- object$time_var
-    out$n_subjects<- object$n_subjects
-    out$n_events  <- sum(object$survmod$status == 1)
-    out$eventtime <- object$survmod$eventtime
-    out$status    <- object$survmod$status > 0
-    out$survmod   <- object$survmod
-    out$qnodes    <- object$qnodes
-    out$epsilon   <- object$epsilon    
-    out$assoc     <- object$assoc
-    out$assocmod  <- list_nms(object$assocmod, M, stub) 
-    out$dataLong  <- list_nms(object$dataLong, M, stub) 
-    out$dataEvent <- object$dataEvent
-    out$grp_stuff <- object$grp_stuff
-    out$fr        <- object$fr
-    classes <- c("stanjm", "stanmvreg", "stanreg", "lmerMod")
-  }
-  out <- rm_null(out, recursive = FALSE)
-  structure(out, class = classes)
+  ), class = "stanmsjm")
 }
 
 

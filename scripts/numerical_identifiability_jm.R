@@ -3,7 +3,13 @@ library(simms)
 library(rstanarm)
 devtools::document()
 set.seed(9911)
-sim1 = simms::sim_idm_jm(n = 2000)
+sim1 = simms::sim_idm_jm(n = 100,
+                         seed = 9911,
+                         fixed_trajectory = "linear",
+                         random_trajectory = "none",
+                         b_sd = 1.5,
+                         assoc = "etavalue",
+                         basehaz = "weibull")
 
 tmat_mst <- mstate::trans.illdeath(names=c("diagnosis","relapse","death"))
 sim1$Mstate = mstate::msprep(time=c(NA,"df_time","os_time"),
@@ -14,7 +20,7 @@ sim1$Mstate = mstate::msprep(time=c(NA,"df_time","os_time"),
 sim1$Mstate <- dplyr::left_join(sim1$Mstate,
                                 sim1$Event)
 
-formulaLong = as.formula(Yij_1 ~  tij + Z1 + Z2 + tij2 + tij3 + (1 | id))
+formulaLong = as.formula(Yij_1 ~  tij + Z1 + Z2 + (1 | id))
 
 formulaMs = lapply(1:3, function (x)
   as.formula(Surv(time=time,event=status) ~ Z1 + Z2) )
@@ -89,10 +95,28 @@ stanfit = msjm_stan(formulaLong = formulaLong,
                       rstanarm::normal() ),
                     basehaz = lapply(1:3, function(x)
                       "weibull"),
-                    iter = 2000, 
-                    chains = 4)
+                    iter = 1, 
+                    chains = 1)
 
-saveRDS(nlist(sim1, stanfit), "~/rfactory/mstte-data/jm_stanfit2.RDS")
+saveRDS(nlist(sim1, stanfit), "~/rfactory/mstte-data/jm_stanfit16.RDS")
 
-stanfit = readRDS("~/rfactory/mstte-data/jm_stanfit.RDS")
-sim1 = readRDS("~/rfactory/mstte-data/jm_sim1.RDS")
+## end of simulation
+# 
+# stanfit = readRDS("~/rfactory/mstte-data/jm_stanfit.RDS")
+# sim1 = readRDS("~/rfactory/mstte-data/jm_sim1.RDS")
+rm(list=ls())
+
+
+### After running in SCP
+library(simms)
+# library(rstanarm, lib.loc = "~/R-dev/")
+library(rstanarm)
+devtools::document()
+set.seed(9911)
+fit = readRDS("~/rfactory/mstte-data/jmMS_ni500.RDS")
+sim1 =fit$sim1
+stanfit = fit$stanfit
+rm(fit)
+as.data.frame(summary(stanfit))
+
+actuals = attr(sim1, "params")

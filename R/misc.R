@@ -254,7 +254,7 @@ addto_formula <- function(x, ...) {
 # @param x A stanreg object
 # @return the posterior sample size (or size of sample from approximate posterior)
 posterior_sample_size <- function(x) {
-  validate_stanmstte_object(x)
+
   if (used.optimizing(x)) {
     return(NROW(x$asymptotic_sampling_dist))
   }
@@ -1053,13 +1053,22 @@ validate_surv <- function(x, ok_types = c("right", "counting",
   x
 }
 
-# Throw error if object isn't a stanreg object
+# Throw error if object isn't a stanmstte object
 #
 # @param x The object to test.
 validate_stanmstte_object <- function(x, call. = FALSE) {
   if (!is.stanmstte(x))
     stop("Object is not a stanmstee object.", call. = call.)
 }
+
+# Throw error if object isn't a stanmsjm object
+#
+# @param x The object to test.
+validate_stanmsjm_object <- function(x, call. = FALSE) {
+  if (!is.stanmsjm(x))
+    stop("Object is not a stanmstee object.", call. = call.)
+}
+
 
 # Validate newdataLong and newdataEvent arguments
 #
@@ -1866,7 +1875,33 @@ is.stanmsjm <- function(x) inherits(x, "stanmsjm")
 get_stub2 <- function(object) {
   if (is.msjm(object)) "Long" else NULL  
 } 
-
+# Converts "Long", "Event" or "Assoc" to the regular expression
+# used at the start of variable names for the fitted joint model
+#
+# @param x The submodel for which the regular expression should be
+#   obtained. Can be "Long", "Event", "Assoc", or an integer specifying
+#   a specific longitudinal submodel.
+mod2rx <- function(x, stub = "Long") {
+  if (x == "^Long") {
+    c("^Long[1-9]\\|")
+  } else if (x == "^Event") {
+    c("^Event\\|")
+  } else if (x == "^Assoc") {
+    c("^Assoc\\|")
+  } else if (x == "Long") {
+    c("Long[1-9]\\|")
+  } else if (x == "Event") {
+    c("Event\\|")
+  } else if (x == "Assoc") {
+    c("Assoc\\|")
+  } else if (x == "^y") {
+    c("^y[1-9]\\|")
+  } else if (x == "y") {
+    c("y[1-9]\\|")
+  } else {
+    paste0("^", stub, x, "\\|")
+  }   
+}
 
 # Separates a names object into separate parts based on the longitudinal, 
 # event, or association parameters.
@@ -1880,7 +1915,7 @@ get_stub2 <- function(object) {
 #   to parameters from the M longitudinal submodels, the event submodel
 #   or association parameters.
 collect_nms_idm <- function(x, M, stub = "Long", ...) {
-  ppd <- grep(paste0("^", stub, ".{1}\\mean_PPD"), x, ...)      
+  ppd <- grep(paste0("mean_PPD"), x, ...)      
   y <- lapply(1:M, function(m) grep(mod2rx(m, stub = stub), x, ...))
   y_extra <- lapply(1:M, function(m) 
     c(grep(paste0("^", stub, m, "\\|sigma"), x, ...),
@@ -2192,6 +2227,7 @@ prepare_data_table <- function(data, id_var, time_var, grp_var = NULL) {
 
   dt[[time_var]] <- as.numeric(dt[[time_var]]) # ensures no rounding on merge
   dt[[id_var]]   <- factor(dt[[id_var]])       # ensures matching of ids
+
   if (!is.null(grp_var))
     dt[[grp_var]]   <- factor(dt[[grp_var]])   # ensures matching of grps
   dt
@@ -2237,6 +2273,7 @@ rolling_merge <- function(data, ids, times, grps = NULL) {
   }
   val
 }
+
 
 # Return the names for the association parameters
 get_assoc_name <- function(a_mod, assoc, ...) {

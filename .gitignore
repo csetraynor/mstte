@@ -39,3 +39,7 @@ rsconnect/
 # compiled files
 *.o
 
+# SCP files
+*out
+*.sh
+

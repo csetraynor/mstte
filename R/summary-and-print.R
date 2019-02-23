@@ -342,6 +342,149 @@ as.data.frame.summary.stanmstte <- function(x, ...) {
 }
 
 
+
+
+#' Summary method for stanmsjm objects
+#'
+#' Summaries of parameter estimates and MCMC convergence diagnostics
+#' (Monte Carlo error, effective sample size, Rhat).
+#'
+#' @export
+#' @method summary stanmsjm
+#'
+#' @param ... Currently ignored.
+#' @param pars An optional character vector specifying a subset of parameters to
+#'   display. Parameters can be specified by name or several shortcuts can be
+#'   used. Using \code{pars="beta"} will restrict the displayed parameters to
+#'   only the regression coefficients (without the intercept). \code{"alpha"}
+#'   can also be used as a shortcut for \code{"(Intercept)"}. If the model has
+#'   varying intercepts and/or slopes they can be selected using \code{pars =
+#'   "varying"}.
+#'
+#'   In addition, for \code{stanmvreg} objects there are some additional shortcuts
+#'   available. Using \code{pars = "long"} will display the
+#'   parameter estimates for the longitudinal submodels only (excluding group-specific
+#'   pparameters, but including auxiliary parameters).
+#'   Using \code{pars = "event"} will display the
+#'   parameter estimates for the event submodel only, including any association
+#'   parameters.
+#'   Using \code{pars = "assoc"} will display only the
+#'   association parameters.
+#'   Using \code{pars = "fixef"} will display all fixed effects, but not
+#'   the random effects or the auxiliary parameters.
+#'    \code{pars} and \code{regex_pars} are set to \code{NULL} then all
+#'   fixed effect regression coefficients are selected, as well as any
+#'   auxiliary parameters and the log posterior.
+#'
+#'   If \code{pars} is \code{NULL} all parameters are selected for a \code{stanreg}
+#'   object, while for a \code{stanmvreg} object all
+#'   fixed effect regression coefficients are selected as well as any
+#'   auxiliary parameters and the log posterior. See
+#'   \strong{Examples}.
+#' @param probs For models fit using MCMC or one of the variational algorithms,
+#'   an optional numeric vector of probabilities passed to
+#'   \code{\link[stats]{quantile}}.
+#' @param digits Number of digits to use for formatting numbers when printing.
+#'   When calling \code{summary}, the value of digits is stored as the
+#'   \code{"print.digits"} attribute of the returned object.
+#'
+#' @return The \code{summary} method returns an object of class
+#'   \code{"summary.stanmstte"} (or \code{"summary.stanmvreg"}, inheriting
+#'   \code{"summary.stanmstte"}), which is a matrix of
+#'   summary statistics and
+#'   diagnostics, with attributes storing information for use by the
+#'   \code{print} method. The \code{print} method for \code{summary.stanmstte} or
+#'   \code{summary.stanmvreg} objects is called for its side effect and just returns
+#'   its input. The \code{as.data.frame} method for \code{summary.stanmstte}
+#'   objects converts the matrix to a data.frame, preserving row and column
+#'   names but dropping the \code{print}-related attributes.
+#'
+#' @seealso \code{\link{prior_summary}} to extract or print a summary of the
+#'   priors used for a particular model.
+#' @importMethodsFrom rstan summary
+summary.stanmsjm <- function(object, pars = NULL, regex_pars = NULL,
+                              probs = NULL, ..., digits = 1) {
+  
+  msjm <- is.stanmsjm(object)
+  pars <- collect_pars(object, pars, regex_pars)
+  
+  if (!used.optimizing(object)) {
+    args <- list(object = object$stanfit)
+    if (!is.null(probs)){
+      args$probs <- probs
+    }
+    out <- object$stan_summary
+    
+    
+    if (is.null(pars) && used.variational(object))
+      out <- out[!rownames(out) %in% "log-posterior", , drop = FALSE]
+    if (!is.null(pars)) {
+      pars <- allow_special_parnames(object, pars)
+      out <- out[rownames(out) %in% pars, , drop = FALSE]
+    }
+    
+    out <- out[!grepl(":_NEW_", rownames(out), fixed = TRUE), , drop = FALSE]
+    stats <- colnames(out)
+    if ("n_eff" %in% stats)
+      out[, "n_eff"] <- round(out[, "n_eff"])
+    if ("se_mean" %in% stats) # So people don't confuse se_mean and sd
+      colnames(out)[stats %in% "se_mean"] <- "mcse"
+    
+  } else { # used optimization
+    if (!is.null(probs))
+      warning("'probs' ignored if for models fit using optimization.",
+              call. = FALSE)
+    if (is.null(pars)) {
+      famname <- family(object)$family
+      mark <- names(object$coefficients)
+      if (is.gaussian(famname))
+        mark <- c(mark, "sigma")
+      if (is.nb(famname))
+        mark <- c(mark, "reciprocal_dispersion")
+    } else {
+      mark <- NA
+      if ("alpha" %in% pars)
+        mark <- c(mark, "(Intercept)")
+      if ("beta" %in% pars)
+        mark <- c(mark, setdiff(names(object$coefficients), "(Intercept)"))
+      mark <- c(mark, setdiff(pars, c("alpha", "beta")))
+      mark <- mark[!is.na(mark)]
+    }
+    out <- object$stan_summary[mark, , drop=FALSE]
+  }
+  
+  structure(
+    out,
+    call          = object$call,
+    algorithm     = object$algorithm,
+    stan_function = object$stan_function,
+    family        = family_plus_link(object),
+    formula       = formula(object),
+    basehaz       =  lapply(object$ms_mod, function(o)
+        basehaz_string(o$basehaz) ),
+    posterior_sample_size = posterior_sample_size(object),
+    nobs          = lapply(object$ms_mod, function(o) o$nevent + o$nrcens) ,
+    nevents       = lapply(object$ms_mod, function(o) o$nevent),
+    nrcens        = lapply(object$ms_mod, function(o) o$nrcens),
+    transition_labels = object$transition_labels,
+    n_trans =  object$n_trans,
+    print.digits  = digits,
+    priors        = object$prior.info,
+    class         = c("summary.stanmstte")
+  )
+}
+
+
+#' @rdname summary.stanmsjm
+#' @method as.data.frame summary.stanmsjm
+#' @export
+as.data.frame.summary.stanmsjm <- function(x, ...) {
+  as.data.frame(unclass(x), ...)
+}
+
+
+
+
 # --- internal --------------------------------------------
 # @param basehaz A list with info about the baseline hazard
 .printfr <- function(x, digits, ...) {
@@ -421,7 +564,7 @@ allow_special_parnames <- function(object, pars) {
 # @param x stanreg object
 # @param ... Optionally include m to specify which submodel for stanmvreg models
 family_plus_link <- function(x, ...) {
-  if (is.stansurv(x) | is.stanmstte(x)) {
+  if (is.stansurv(x) | is.stanmstte(x) | is.stanmsjm(x)) {
     return(NULL)
   }
   fam <- family(x, ...)
