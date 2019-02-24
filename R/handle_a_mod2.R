@@ -311,3 +311,26 @@ assoc_obstime <- function(e_mod, id_trans, long, meta){
   out[is.na(out)] <- FALSE
   return(out)
 }
+
+
+# Filter associated times between the longitudinal model and hazard sumbmodel
+#
+# @param x Long dataset
+# @param t_var time variable from long dataset.
+# @param t time event vector
+match_obs <- function(newdataMs, id_trans, long, time_var, id_var, time_start_var){
+
+  id_trans <- as.integer(id_trans)
+  tmp <- dplyr::data_frame(id = id_trans,
+                    e_time = newdataMs[[time_start_var]] + newdataMs[[time_var]],
+                    s_time = newdataMs[[time_start_var]])
+  colnames(tmp) <- c(id_var, "e_time", "s_time")
+  
+  tmpx <- dplyr::left_join(long, tmp, by = id_var)
+  
+  #out <- (tmpx[[time_var]] < tmpx[["e_time"]]) & (tmpx[[time_var]] >= tmpx[["s_time"]])
+  
+  out <- (tmpx[[time_var]] <= tmpx[["e_time"]]) 
+  out[is.na(out)] <- FALSE
+  return(out)
+}

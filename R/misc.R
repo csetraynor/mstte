@@ -832,6 +832,29 @@ extract_pars.stanmstte <- function(object, stanmat = NULL, means = FALSE) {
   nlist(alpha, beta, beta_tde, aux, smooth, stanmat)
 }
 
+extract_pars.stanmsjm <- function(object, stanmat = NULL, means = FALSE) {
+  validate_stanmsjm_object(object)
+  M <- get_M(object)
+  if (is.null(stanmat)) 
+    stanmat <- as.matrix(object$stanfit)
+  if (means) 
+    stanmat <- t(colMeans(stanmat)) # return posterior means
+  nms   <- collect_nms_idm(colnames(stanmat), M, stub = get_stub(object))
+  beta  <- lapply(1:M, function(m) stanmat[, nms$y[[m]], drop = FALSE])
+  ebeta <- stanmat[, nms$e, drop = FALSE]
+  abeta <- stanmat[, nms$a, drop = FALSE]
+  bhcoef <- stanmat[, nms$e_extra, drop = FALSE]
+  b     <- lapply(1:M, function(m) stanmat[, nms$y_b[[m]], drop = FALSE])
+  nlist(beta, ebeta, abeta, bhcoef, b, stanmat)
+}
+
+# Return the appropriate stub for variable names
+#
+# @param object A stanmvreg object
+get_stub <- function(object) {
+  if (is.stanmsjm(object)) "Long" else if (is.mvmer(object)) "y" else NULL  
+} 
+
 # Return the name of the tde spline coefs or smoothing parameters.
 #
 # @param x The predictor matrix for the time-dependent effects, with column names.
@@ -922,6 +945,7 @@ get_aux_name_basehaz <- function(x, ...) {
          piecewise = paste0("piecewise-coef", seq(x$nvars)),
          NA)
 }
+
 
 #' Extract X, Y or Z from a stanreg object
 #'
@@ -1080,9 +1104,92 @@ validate_stanmsjm_object <- function(x, call. = FALSE) {
 # @param response A logical specifying whether the longitudinal response
 #   variable must be included in the new data frame
 # @return A list of validated data frames
-validate_newdatas <- function(object, newdataLong = NULL, newdataEvent = NULL,
+validate_newdatas <- function(object, newdataLong = NULL, newdataMs = NULL,
                               duplicate_ok = FALSE, response = TRUE) {
-  validate_stanmstte_object(object)
+  #validate_stanmstte_object(object) | validate_stanmsjm_object(object)
+  id_var <- object$id_var
+  n_trans <- object$n_trans
+  transition_labels <- object$transition_labels
+  M <- get_M(object)
+  
+  newdatas <- list()
+  if (!is.null(newdataLong)) {
+    if (!is(newdataLong, "list"))
+      newdataLong <- rep(list(newdataLong), get_M(object))
+    dfcheck <- sapply(newdataLong, is.data.frame)
+    if (!all(dfcheck))
+      stop("'newdataLong' must be a data frame or list of data frames.", call. = FALSE)
+    nacheck <- sapply(seq_along(newdataLong), function(m) {
+      if (response) { # newdataLong needs the reponse variable
+        fmL <- formula(object)[[m]]
+      } else { # newdataLong only needs the covariates
+        fmL <- formula(object)[[m]][c(1,3)]
+      }
+      all(!is.na(get_all_vars(fmL, newdataLong[[m]])))
+    })
+    if (!all(nacheck))
+      stop("'newdataLong' cannot contain NAs.", call. = FALSE)
+    newdatas <- c(newdatas, newdataLong)
+    names(newdatas) <- paste0("Long", seq_len(M))
+  }
+  if (!is.null(newdataMs)) {
+    newdataMs_list <- lapply(seq_len(n_trans), function(i) newdataMs[newdataMs[["trans"]] == i ,] )
+    
+    for(i in seq_len(n_trans)){
+      nms_newdatas <- c( names(newdatas)[seq_len(M + i - 1)], paste0("trans__", transition_labels[i]))
+      
+      newdataEvent <- newdataMs_list[[i]]
+      
+      if (!is.data.frame(newdataEvent))
+        stop("'newdataMs' must be a data frame.", call. = FALSE)
+      if (response) { # newdataEvent needs the reponse variable
+        fmE <- formula(object)[[M + i]]
+      } else { # newdataEvent only needs the covariates
+        fmE <- formula(object, m = "Event")[c(1,3)]
+      }
+      dat <- get_all_vars(fmE, newdataEvent)
+      dat[[id_var]] <- newdataEvent[[id_var]] # include ID variable in event data
+      
+      if (any(is.na(dat)))
+        stop("'newdataMs' cannot contain NAs.", call. = FALSE)
+      
+      if (!duplicate_ok && any(duplicated(newdataEvent[[id_var]])))
+        stop("'newdataMs' should only contain one row per individual, since ",
+             "time varying covariates are not allowed in the prediction data.")
+      
+      newdatas[[M + i]] <- newdataEvent
+      names(newdatas) <- nms_newdatas
+    
+    }
+  }
+  if (length(newdatas)) {
+    idvar_check <- sapply(newdatas, function(x) id_var %in% colnames(x))
+    if (!all(idvar_check))
+      STOP_no_var(id_var)
+    ids <- lapply(newdatas, function(x) unique(x[[id_var]]))
+    sorted_ids <- lapply(ids, sort)
+    # if (!length(unique(sorted_ids)) == 1L)
+    #   stop("The same subject ids should appear in each new data frame.")
+    # if (!length(unique(ids)) == 1L)
+    #   stop("The subject ids should be ordered the same in each new data frame.")
+    return(newdatas)
+  } else return(NULL)
+}
+
+
+# Validate newdataLong and newdataEvent arguments
+#
+# @param object A stanmvreg object
+# @param newdataLong A data frame, or a list of data frames
+# @param newdataEvent A data frame
+# @param duplicate_ok A logical. If FALSE then only one row per individual is
+#   allowed in the newdataEvent data frame
+# @param response A logical specifying whether the longitudinal response
+#   variable must be included in the new data frame
+# @return A list of validated data frames
+validate_newdatas2 <- function(object, newdataLong = NULL, newdataEvent = NULL,
+                              duplicate_ok = FALSE, response = TRUE) {
+  #validate_stanmvreg_object(object)
   id_var <- object$id_var
   newdatas <- list()
   if (!is.null(newdataLong)) {
@@ -1097,7 +1204,7 @@ validate_newdatas <- function(object, newdataLong = NULL, newdataEvent = NULL,
       } else { # newdataLong only needs the covariates
         fmL <- formula(object, m = m)[c(1,3)]
       }
-      all(!is.na(get_all_vars(fmL, newdataLong[[m]])))
+      all(!is.na(get_all_vars(fmL, newdataLong[[m]]))) 
     })
     if (!all(nacheck))
       stop("'newdataLong' cannot contain NAs.", call. = FALSE)
@@ -1121,18 +1228,19 @@ validate_newdatas <- function(object, newdataLong = NULL, newdataEvent = NULL,
     newdatas <- c(newdatas, list(Event = newdataEvent))
   }
   if (length(newdatas)) {
-    idvar_check <- sapply(newdatas, function(x) id_var %in% colnames(x))
-    if (!all(idvar_check))
+    idvar_check <- sapply(newdatas, function(x) id_var %in% colnames(x)) 
+    if (!all(idvar_check)) 
       STOP_no_var(id_var)
     ids <- lapply(newdatas, function(x) unique(x[[id_var]]))
     sorted_ids <- lapply(ids, sort)
-    if (!length(unique(sorted_ids)) == 1L)
+    if (!length(unique(sorted_ids)) == 1L) 
       stop("The same subject ids should appear in each new data frame.")
-    if (!length(unique(ids)) == 1L)
-      stop("The subject ids should be ordered the same in each new data frame.")
+    if (!length(unique(ids)) == 1L) 
+      stop("The subject ids should be ordered the same in each new data frame.")  
     return(newdatas)
   } else return(NULL)
 }
+
 
 # ------- Helpers data ------------------ #
 # Parse the model formula
@@ -1846,6 +1954,60 @@ mod2rx <- function(x, stub = "Long") {
     paste0("^", stub, x, "\\|")
   }
 }
+
+
+# Return an array or list with the time sequence used for posterior predictions
+#
+# @param increments An integer with the number of increments (time points) at
+#   which to predict the outcome for each individual
+# @param t0,t1 Numeric vectors giving the start and end times across which to
+#   generate prediction times
+# @param simplify Logical specifying whether to return each increment as a 
+#   column of an array (TRUE) or as an element of a list (FALSE) 
+get_time_seq <- function(increments, t0, t1, simplify = TRUE) {
+  val <- sapply(0:(increments - 1), function(x, t0, t1) {
+    t0 + (t1 - t0) * (x / (increments - 1))
+  }, t0 = t0, t1 = t1, simplify = simplify)
+  if (simplify && is.vector(val)) {
+    # need to transform if there is only one individual
+    val <- t(val)
+    rownames(val) <- if (!is.null(names(t0))) names(t0) else 
+      if (!is.null(names(t1))) names(t1) else NULL
+  }
+  return(val)
+}
+
+# Sample rows from a stanmat object
+#
+# @param object A stanreg object.
+# @param draws The number of draws/rows to sample.
+# @param default_draws Integer; if draws is not specified then it is set to 
+#   the minimum of 'default_draws' or the posterior sample size.
+# @return A matrix with 'draws' rows and 'ncol(stanmat)' columns.
+sample_stanmat <- function(object, draws = NULL, default_draws = 200) {
+  S <- posterior_sample_size(object)
+  if (is.null(draws))
+    draws <- min(default_draws, S)
+  if (draws > S)
+    stop2("'draws' should be <= posterior sample size (", S, ").")
+  stanmat <- as.matrix(object$stanfit)
+  if (isTRUE(draws < S)) {
+    stanmat <- sample_rows(stanmat, draws)
+  }
+  stanmat
+}
+
+# Sample rows from a two-dimensional object 
+#
+# @param x The two-dimensional object (e.g. matrix, data frame, array).
+# @param size Integer specifying the number of rows to sample.
+# @param replace Should the rows be sampled with replacement?
+# @return A two-dimensional object with 'size' rows and 'ncol(x)' columns.
+sample_rows <- function(x, size, replace = FALSE) {
+  samp <- sample(nrow(x), size, replace)
+  x[samp, , drop = FALSE]
+}
+
 # Grep for "b" parameters (ranef), can optionally be specified
 # for a specific longitudinal submodel
 #
@@ -1869,12 +2031,7 @@ is.stanms  <- function(x) inherits(x, "stanms")
 is.stanjm    <- function(x) inherits(x, "stanjm")
 is.stanmsjm <- function(x) inherits(x, "stanmsjm")
 
-# Return the appropriate stub for variable names
-#
-# @param object A stanmvreg object
-get_stub2 <- function(object) {
-  if (is.msjm(object)) "Long" else NULL  
-} 
+
 # Converts "Long", "Event" or "Assoc" to the regular expression
 # used at the start of variable names for the fitted joint model
 #
@@ -1923,18 +2080,45 @@ collect_nms_idm <- function(x, M, stub = "Long", ...) {
       grep(paste0("^", stub, m, "\\|lambda"), x, ...),
       grep(paste0("^", stub, m, "\\|reciprocal_dispersion"), x, ...)))             
   y <- lapply(1:M, function(m) setdiff(y[[m]], c(y_extra[[m]], ppd[m])))
-  e <- grep(mod2rx("^Event"), x, ...)     
-  e_extra <- c(grep("^Event\\|weibull-shape|^Event\\|b-splines-coef|^Event\\|piecewise-coef", x, ...))         
+  e <- grep(".*trans.*", x, ...)     
+  e_extra <- c(grep("weibull-shape*.|b-splines-coef*.|piecewise-coef*.", x, ...))         
   e <- setdiff(e, e_extra)
   a <- grep(mod2rx("^Assoc"), x, ...)
   b <- b_names(x, ...)
   y_b <- lapply(1:M, function(m) b_names_M(x, m, stub = stub, ...))
   alpha <- grep("^.{5}\\|\\(Intercept\\)", x, ...)      
   alpha <- c(alpha, grep(pattern=paste0("^", stub, ".{1}\\|\\(Intercept\\)"), x=x, ...))
+  e <- setdiff(e, alpha)
+  e <- setdiff(e, a)
   beta <- setdiff(c(unlist(y), e, a), alpha)  
   nlist(y, y_extra, y_b, e, e_extra, a, b, alpha, beta, ppd) 
 }
 
+# Return data frames only including the specified subset of individuals
+#
+# @param object A stanmvreg object
+# @param data A data frame, or a list of data frames
+# @param ids A vector of ids indicating which individuals to keep
+# @return A data frame, or a list of data frames, depending on the input
+subset_ids <- function(object, data, ids) {
+  if (is.null(data))
+    return(NULL)
+ 
+  id_var <- object$id_var
+  is_list <- is(data, "list")
+  if (!is_list) data <- list(data)
+  is_df <- sapply(data, is.data.frame)
+  if (!all(is_df)) stop("'data' should be a data frame, or list of data frames.")
+  data <- lapply(data, function(x) {
+    if (!id_var %in% colnames(x)) STOP_no_var(id_var)
+    sel <- which(!ids %in% x[[id_var]])
+    if (length(sel)) 
+      stop("The following 'ids' do not appear in the data: ", 
+           paste(ids[[sel]], collapse = ", "))
+    x[x[[id_var]] %in% ids, , drop = FALSE]
+  })
+  if (is_list) return(data) else return(data[[1]])
+}
 
 # Supplies names for the output list returned by most stanmvreg methods
 #
@@ -1943,7 +2127,7 @@ collect_nms_idm <- function(x, M, stub = "Long", ...) {
 #   longitudinal/GLM submodels is assumed to be equal to the length of object.
 # @param stub The character string to use at the start of the names for
 #   list items related to the longitudinal/GLM submodels
-list_nms <- function(object, M = NULL, stub = "Long") {
+list_nms <- function(object, M = NULL, stub = "Long", transition_labels) {
   ok_type <- is.null(object) || is.list(object) || is.vector(object)
   if (!ok_type) 
     stop("'object' argument should be a list or vector.")
@@ -1952,49 +2136,13 @@ list_nms <- function(object, M = NULL, stub = "Long") {
   if (is.null(M)) 
     M <- length(object)
   nms <- paste0(stub, 1:M)
-  if (length(object) > M) 
+  if(!missing(transition_labels)){
+    nms <- c(nms, paste0("trans__" ,transition_labels) )
+  } else if (length(object) > M) {
     nms <- c(nms, "Event")
+  }
   names(object) <- nms
   object
-}
-# Return the spline basis for the given type of baseline hazard.
-#
-# @param times A numeric vector of times at which to evaluate the basis.
-# @param basehaz A list with info about the baseline hazard, returned by a
-#   call to 'handle_basehaz'.
-# @param integrate A logical, specifying whether to calculate the integral of
-#   the specified basis.
-# @return A matrix.
-make_basis <- function(times, basehaz, integrate = FALSE) {
-  N <- length(times)
-  K <- basehaz$nvars
-  if (!N) { # times is NULL or empty vector
-    return(matrix(0, 0, K))
-  }
-  switch(basehaz$type_name,
-         "exp"       = matrix(0, N, K), # dud matrix for Stan
-         "weibull"   = matrix(0, N, K), # dud matrix for Stan
-         "gompertz"  = matrix(0, N, K), # dud matrix for Stan
-         "ms"        = basis_matrix(times, basis = basehaz$basis, integrate = integrate),
-         "bs"        = basis_matrix(times, basis = basehaz$basis),
-         "piecewise" = dummy_matrix(times, knots = basehaz$knots),
-         stop2("Bug found: type of baseline hazard unknown."))
-}
-
-# Evaluate a spline basis matrix at the specified times
-#
-# @param time A numeric vector.
-# @param basis Info on the spline basis.
-# @param integrate A logical, should the integral of the basis be returned?
-# @return A two-dimensional array.
-basis_matrix <- function(times, basis, integrate = FALSE) {
-  out <- predict(basis, times)
-  if (integrate) {
-    stopifnot(inherits(basis, "mSpline"))
-    class(basis) <- c("matrix", "iSpline")
-    out <- predict(basis, times)
-  }
-  aa(out)
 }
 
 # Return the fe predictor matrix for estimation
@@ -2330,4 +2478,37 @@ drop_attributes <- function(x, ...) {
     }
   }
   x
+}
+
+# Return the number of longitudinal submodels
+#
+# @param object A stanmvreg object
+get_M <- function(object) {
+  validate_stanmsjm_object(object)
+  return(object$n_markers)
+}
+
+# Return the number of event submodels
+#
+# @param object A stanmvreg object
+get_n_trans <- function(object) {
+  validate_stanmsjm_object(object)
+  return(object$n_trans)
+}
+
+
+get_transitions_pars <- function(pars, transition_labels){
+  lapply(transition_labels, function(t){
+    string_to_grep <- paste0("*.trans\\(", t, "\\)")
+    string_to_grep_ms <- paste0("*.trans\\(.*")
+    beta <- pars$beta
+    ebeta <- pars$ebeta[,grepl(string_to_grep, colnames(pars$ebeta)), drop = FALSE]
+    abeta <- pars$abeta[,grepl(string_to_grep, colnames(pars$abeta)), drop = FALSE]
+    bhcoef <- pars$bhcoef[,grepl(string_to_grep, colnames(pars$bhcoef)), drop = FALSE]
+    stanmat_ms <- !grepl(string_to_grep_ms, colnames(pars$stanmat) )
+    stanmat_grep_string <- (grepl(string_to_grep, colnames(pars$stanmat)) | stanmat_ms)
+    stanmat <- pars$stanmat[,stanmat_grep_string, drop = FALSE]
+    nlist(beta, ebeta, abeta, bhcoef, stanmat)
+  }
+    )
 }

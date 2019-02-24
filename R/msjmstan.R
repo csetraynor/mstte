@@ -43,8 +43,8 @@ msjmstan <- function(object) {
   }
 
   structure( nlist(
-    formula       = list_nms(object$formula, M, stub),
-    terms         = list_nms(object$terms, M, stub),
+    formula       = list_nms(ulist(object$formula), M, stub, transition_labels),
+    terms         = list_nms(object$terms, M, stub, transition_labels),
     coefficients  = coefs, 
     ses           = ses,
     covmat        = covmat,
@@ -56,6 +56,12 @@ msjmstan <- function(object) {
     cnms      = object$cnms,
     flevels   = object$flevels,
     n_markers = object$M,
+    time_var  = object$time_var,
+    id_var    = object$id_var,
+    basehaz   = object$basehaz,
+    assoc     = object$assoc,
+    id_list   = object$id_list,
+    obs_list  = object$obs_list,
     n_grps    = object$n_grps,
     n_yobs    = list_nms(object$n_yobs, M, stub),
     family    = list_nms(object$family, M, stub),

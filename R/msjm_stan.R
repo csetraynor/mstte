@@ -1697,6 +1697,7 @@ msjm_stan <- function(formulaLong,
       user_max_treedepth = max_treedepth,
       show_messages = FALSE)
     stanfit <- do.call(rstan::sampling, args)
+    
   } else { # meanfield or fullrank vb
     args <- nlist(
       object = stanfit,
@@ -1730,15 +1731,14 @@ msjm_stan <- function(formulaLong,
         NULL
       }
     } )
-    
     ms_nms_aux <- lapply(seq_len(n_trans), function(i) {
       if(get_basehaz_name(basehaz[[i]]) != "exp"){
-        append_trans(get_aux_name_basehaz(basehaz[[i]]), i, transition_labels[i])
+        append_trans(get_aux_name_basehaz(ms_mod[[i]]$basehaz), i, transition_labels[i])
       } else {
         NULL
       }
     } )
-    
+  
     ms_nms_assoc <- lapply(a_mod, get_assoc_name, assoc)
     ms_nms_assoc <- lapply(seq_len(n_trans), function(i) {
       append_trans(ms_nms_assoc[[i]], i, transition_labels[i])
@@ -1798,9 +1798,13 @@ msjm_stan <- function(formulaLong,
                              "grp_stuff", "prior_info")
   
   terms <- c(fetch(y_mod, "terms"), lapply(ms_mod, function(m) terms(m$mod)) ) 
+  
+  
   n_yobs <- fetch_(y_mod, "x", "N")
   n_grps <- sapply(flevels, n_distinct)
   n_subjects <- max( uapply(ms_mod, function(m) m$mod$n ) )
+  
+  
   
   fit <- structure(
     nlist(stanfit, 
@@ -1816,6 +1820,8 @@ msjm_stan <- function(formulaLong,
                n_trans,
                transition_labels,
                cnms, 
+               id_list = meta$id_trans,
+               obs_list = assoc_obs,
                flevels,
                n_grps,
                n_subjects, 

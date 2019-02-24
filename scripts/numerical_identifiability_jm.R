@@ -1,6 +1,6 @@
 library(simms)
-# library(rstanarm, lib.loc = "~/R-dev/")
-library(rstanarm)
+library(rstanarm, lib.loc = "~/R-dev/")
+#library(rstanarm)
 devtools::document()
 set.seed(9911)
 sim1 = simms::sim_idm_jm(n = 100,
@@ -49,8 +49,8 @@ priorEvent_assoc = lapply(1:3, function(x)
   rstanarm::normal() )
 
 dataLong = sim1$Long1
-dataLong$tij2 <- dataLong$tij*dataLong$tij  
-dataLong$tij3 <- dataLong$tij2*dataLong$tij  
+# dataLong$tij2 <- dataLong$tij*dataLong$tij  
+# dataLong$tij3 <- dataLong$tij2*dataLong$tij  
 dataMs = sim1$Mstate
 
 time_var = "tij"
@@ -101,22 +101,30 @@ stanfit = msjm_stan(formulaLong = formulaLong,
 saveRDS(nlist(sim1, stanfit), "~/rfactory/mstte-data/jm_stanfit16.RDS")
 
 ## end of simulation
-# 
-# stanfit = readRDS("~/rfactory/mstte-data/jm_stanfit.RDS")
-# sim1 = readRDS("~/rfactory/mstte-data/jm_sim1.RDS")
-rm(list=ls())
 
-
-### After running in SCP
-library(simms)
-# library(rstanarm, lib.loc = "~/R-dev/")
-library(rstanarm)
+simfit = readRDS("~/rfactory/mstte-data/jmMS_ni2000.RDS")
 devtools::document()
-set.seed(9911)
-fit = readRDS("~/rfactory/mstte-data/jmMS_ni500.RDS")
-sim1 =fit$sim1
-stanfit = fit$stanfit
-rm(fit)
-as.data.frame(summary(stanfit))
+sumfit = as.data.frame(summary(simfit$stanfit))
+actual = unlist( attr(simfit$sim1,"params") )
 
-actuals = attr(sim1, "params")
+sumb = sumfit[grepl("b\\[Long1", rownames(sumfit)), ]
+sumfit = sumfit[!grepl("b\\[Long1|posterior", rownames(sumfit)), ]
+
+actual <- c(
+  "(Intercept)_1"  = log(lambdas01_t),
+  "weibull-shape_1" = gammas01_t,
+  
+  "(Intercept)_2" = log(lambdas02_t),
+  "weibull-shape_2" = gammas02_t,
+  
+  "(Intercept)_3" = log(lambdas12_t),
+  "weibull-shape_3" = gammas12_t)
+
+
+actual = actual[ c(1,5,2,3,grep("betaEvent_intercept", names(actual) ), 7,8,12,13,17,18,9,14,19,4,grep("betaEvent_aux", names(actual) ),  21, 22) ]
+
+numtest = cbind(actual, sumfit)
+
+posterior <- as.array(simfit$stanfit$stanfit)
+
+
