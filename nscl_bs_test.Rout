@@ -1,0 +1,418 @@
+
+R version 3.5.1 (2018-07-02) -- "Feather Spray"
+Copyright (C) 2018 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+Microsoft R Open 3.5.1
+The enhanced R distribution from Microsoft
+Microsoft packages Copyright (C) 2018 Microsoft Corporation
+
+Using the Intel MKL for parallel mathematical computing (using 8 cores).
+
+Default CRAN mirror snapshot taken on 2018-08-01.
+See: https://mran.microsoft.com/.
+
+[Previously saved workspace restored]
+
+> library(rstanarm)
+Loading required package: Rcpp
+rstanarm (Version 2.18.1, packaged: )
+- Do not expect the default priors to remain the same in future rstanarm versions.
+Thus, R scripts should specify priors explicitly, even if they are just the defaults.
+- For execution on a local, multicore CPU with excess RAM we recommend calling
+options(mc.cores = parallel::detectCores())
+- Plotting theme set to bayesplot::theme_default().
+> library(dplyr)
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+> library(data.table)
+
+Attaching package: ‘data.table’
+
+The following objects are masked from ‘package:dplyr’:
+
+    between, first, last
+
+> library(caret)
+Loading required package: lattice
+Loading required package: ggplot2
+
+Attaching package: ‘caret’
+
+The following objects are masked from ‘package:rstanarm’:
+
+    compare_models, R2
+
+> devtools::document()
+Updating mstte documentation
+Loading mstte
+Warning: Version of roxygen2 last used with this package is 6.1.1.  You only have version 6.1.0
+Writing NAMESPACE
+Writing NAMESPACE
+> 
+> seed = 9911
+> set.seed(seed)
+> 
+> nscl_data = readRDS("~/rfactory/mstte-data/nscl_data.RDS")
+> nscl_ldh = nscl_data$nscl_ldh
+> 
+> a <- createDataPartition(nscl_data$nscl_surv$os_status, list=FALSE, p = 0.75)
+> 
+> training <- nscl_data$nscl_surv[a,]
+> test <- nscl_data$nscl_surv[-a,]
+> 
+> tmat_mst <- mstate::trans.illdeath(names=c("diagnosis","progression","death"))
+> nscl_mstte =  mstate::msprep(time=c(NA,"dp_time","os_time"),
++                              status=c(NA,"dp_status","os_status"),
++                              data = training,
++                              trans=tmat_mst, id = "id")
+Warning message:
+In msprepEngine(time = time, status = status, id = id, starttime = starttime,  :
+  From starting state 1, subject 4 9 17 21 22 29 39 44 51 60 74 79 88 89 110 111 126 128 138 140 144 146 161 198 221 229 241 268 270 273 275 295 299 335 357 378 395 401 408 410 412 426 436 457 473 474 509 has smallest transition time with status=0, larger transition time with status=1
+> 
+> nscl_mstte = left_join(nscl_mstte, training, by = "id")
+> id_train = training$id
+> nscl_ldh_train = nscl_ldh[nscl_ldh$id %in% id_train, ]
+> nscl_ldh_test = nscl_ldh[!(nscl_ldh$id %in% nscl_ldh_train$id), ]
+> 
+> length(unique(nscl_ldh_train$id))
+[1] 399
+> length(unique(nscl_mstte$id))
+[1] 399
+> all(nscl_mstte$id %in% nscl_ldh$id)
+[1] TRUE
+> all(nscl_ldh_train$id %in% nscl_mstte$id)
+[1] TRUE
+> 
+> 
+> dupe = nscl_ldh_train[,c('USUBJID','time')] # select columns to check duplicates
+> une = unique( nscl_ldh_train[duplicated(dupe) | duplicated(dupe, fromLast=TRUE),] )
+> 
+> nscl_ldh_train = nscl_ldh_train [!(duplicated(dupe) | duplicated(dupe, fromLast=TRUE) ),] 
+> nscl_ldh_train = rbind(une, nscl_ldh_train)
+> nscl_ldh_train = nscl_ldh_train[order(nscl_ldh_train$id, nscl_ldh_train$time), ]
+> 
+> 
+> options(mc.cores = 8L)
+> stanfit = msjm_stan(formulaLong = ldh ~  time + ECOGBL + BMIBL + SEX + EGFKTIFL + (1 | id),
++                   dataLong = nscl_ldh_train,
++                   formulaMs = lapply(1:3, function (x){
++                     Surv(time=time,event=status) ~ ECOGBL + BMIBL + SEX + EGFKTIFL }),
++                   dataMs = nscl_mstte,
++                   time_var = "time",
++                   transition_labels = c("01", "02", "12"),
++                   time_start = "Tstart",
++                   id_var = "id",
++                   init = "prefit",
++                   family = gaussian,
++                   assoc = "etavalue",
++                   lag_assoc = 0,
++                   epsilon = 1E-5,
++                   prior_PD = FALSE,
++                   priorLong = rstanarm::normal(),
++                   priorLong_intercept = rstanarm::normal(),
++                   priorLong_aux = rstanarm::cauchy(0, 5),
++                   prior_covariance = rstanarm::lkj(),
++                   priorMs_intercept = lapply(1:3, function(x)
++                     rstanarm::normal() ),
++                   priorMs_aux = lapply(1:3, function(x)
++                     rstanarm::cauchy() ),
++                   priorMs = lapply(1:3, function(x)
++                     rstanarm::normal() ),
++                   priorMs_assoc = lapply(1:3, function(x)
++                     rstanarm::normal() ),
++                   basehaz = lapply(1:3, function(x)
++                     "bs"),
++                   seed = seed,
++                   adapt_delta = 0.99,
++                   iter = 3000, 
++                   chains = 8)
+Fitting a univariate joint multi-state model with 3 states.
+
+Please note the warmup may be much slower than later iterations!
+
+SAMPLING FOR MODEL 'msjm' NOW (CHAIN 1).
+
+SAMPLING FOR MODEL 'msjm' NOW (CHAIN 2).
+Chain 1: 
+Chain 1: Gradient evaluation took 0.02 seconds
+Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 200 seconds.
+Chain 1: Adjust your expectations accordingly!
+Chain 1: 
+Chain 1: 
+
+SAMPLING FOR MODEL 'msjm' NOW (CHAIN 3).
+Chain 2: 
+Chain 2: Gradient evaluation took 0.01 seconds
+Chain 2: 1000 transitions using 10 leapfrog steps per transition would take 100 seconds.
+Chain 2: Adjust your expectations accordingly!
+Chain 2: 
+Chain 2: 
+
+SAMPLING FOR MODEL 'msjm' NOW (CHAIN 4).
+Chain 3: 
+Chain 3: Gradient evaluation took 0.01 seconds
+Chain 3: 1000 transitions using 10 leapfrog steps per transition would take 100 seconds.
+Chain 3: Adjust your expectations accordingly!
+Chain 3: 
+Chain 3: 
+
+SAMPLING FOR MODEL 'msjm' NOW (CHAIN 5).
+Chain 4: 
+Chain 4: Gradient evaluation took 0.01 seconds
+Chain 4: 1000 transitions using 10 leapfrog steps per transition would take 100 seconds.
+Chain 4: Adjust your expectations accordingly!
+Chain 4: 
+Chain 4: 
+
+SAMPLING FOR MODEL 'msjm' NOW (CHAIN 6).
+
+SAMPLING FOR MODEL 'msjm' NOW (CHAIN 7).
+Chain Chain 5: 
+6: 
+Chain 5Chain : 6Gradient evaluation took 0.01 seconds: 
+Gradient evaluation took 0.01 seconds
+Chain 5Chain : 61000 transitions using 10 leapfrog steps per transition would take 100 seconds.: 
+1000 transitions using 10 leapfrog steps per transition would take 100 seconds.Chain 
+5Chain : 6Adjust your expectations accordingly!: 
+Adjust your expectations accordingly!Chain 
+5Chain : 6
+: Chain 
+5Chain : 6
+: 
+
+SAMPLING FOR MODEL 'msjm' NOW (CHAIN 8).
+Chain 8: 
+Chain 8: Gradient evaluation took 0.01 seconds
+Chain 8: 1000 transitions using 10 leapfrog steps per transition would take 100 seconds.
+Chain 8: Adjust your expectations accordingly!
+Chain 8: 
+Chain 8: 
+Chain 7: 
+Chain 7: Gradient evaluation took 0.02 seconds
+Chain 7: 1000 transitions using 10 leapfrog steps per transition would take 200 seconds.
+Chain 7: Adjust your expectations accordingly!
+Chain 7: 
+Chain 7: 
+Chain 1: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 3: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 2: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 5: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 8: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 4: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 6: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 7: Iteration:    1 / 3000 [  0%]  (Warmup)
+Chain 8: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 1: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 2: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 4: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 5: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 3: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 8: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 4: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 1: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 2: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 6: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 5: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 3: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 8: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 7: Iteration:  300 / 3000 [ 10%]  (Warmup)
+Chain 1: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 4: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 2: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 5: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 3: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 6: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 8: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 7: Iteration:  600 / 3000 [ 20%]  (Warmup)
+Chain 1: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 4: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 2: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 5: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 3: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 8: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 8: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 7: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 1: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 1: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 2: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 2: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 4: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 4: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 6: Iteration:  900 / 3000 [ 30%]  (Warmup)
+Chain 5: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 5: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 3: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 3: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 8: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 7: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 1: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 2: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 4: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 5: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 3: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 8: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 7: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 7: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 1: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 2: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 4: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 6: Iteration: 1200 / 3000 [ 40%]  (Warmup)
+Chain 5: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 3: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 8: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 7: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 1: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 2: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 4: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 3: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 5: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 8: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 7: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 1: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 6: Iteration: 1500 / 3000 [ 50%]  (Warmup)
+Chain 6: Iteration: 1501 / 3000 [ 50%]  (Sampling)
+Chain 2: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 4: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 3: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 5: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 8: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 8: 
+Chain 8:  Elapsed Time: 1276.73 seconds (Warm-up)
+Chain 8:                969.34 seconds (Sampling)
+Chain 8:                2246.07 seconds (Total)
+Chain 8: 
+Chain 1: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 7: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 1: 
+Chain 1:  Elapsed Time: 1336.23 seconds (Warm-up)
+Chain 1:                929.33 seconds (Sampling)
+Chain 1:                2265.56 seconds (Total)
+Chain 1: 
+Chain 6: Iteration: 1800 / 3000 [ 60%]  (Sampling)
+Chain 2: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 2: 
+Chain 2:  Elapsed Time: 1373.36 seconds (Warm-up)
+Chain 2:                936.44 seconds (Sampling)
+Chain 2:                2309.8 seconds (Total)
+Chain 2: 
+Chain 4: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 4: 
+Chain 4:  Elapsed Time: 1385.33 seconds (Warm-up)
+Chain 4:                938.3 seconds (Sampling)
+Chain 4:                2323.63 seconds (Total)
+Chain 4: 
+Chain 3: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 3: 
+Chain 3:  Elapsed Time: 1436.13 seconds (Warm-up)
+Chain 3:                916.41 seconds (Sampling)
+Chain 3:                2352.54 seconds (Total)
+Chain 3: 
+Chain 5: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 5: 
+Chain 5:  Elapsed Time: 1432.36 seconds (Warm-up)
+Chain 5:                927.11 seconds (Sampling)
+Chain 5:                2359.47 seconds (Total)
+Chain 5: 
+Chain 7: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 6: Iteration: 2100 / 3000 [ 70%]  (Sampling)
+Chain 7: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 7: 
+Chain 7:  Elapsed Time: 1702.32 seconds (Warm-up)
+Chain 7:                852.8 seconds (Sampling)
+Chain 7:                2555.12 seconds (Total)
+Chain 7: 
+Chain 6: Iteration: 2400 / 3000 [ 80%]  (Sampling)
+Chain 6: Iteration: 2700 / 3000 [ 90%]  (Sampling)
+Chain 6: Iteration: 3000 / 3000 [100%]  (Sampling)
+Chain 6: 
+Chain 6:  Elapsed Time: 2117.65 seconds (Warm-up)
+Chain 6:                717.09 seconds (Sampling)
+Chain 6:                2834.74 seconds (Total)
+Chain 6: 
+> 
+> saveRDS(nlist(stanfit,nscl_ldh_train, nscl_ldh_test, surv_train = training, surv_test = test, seed, a) , "~/rfactory/mstte-data/nscl_bs_test.RDS")
+> 
+> # AFTER FITTING
+> # 
+> # ### Check model predictions
+> # fit = readRDS("~/rfactory/mstte-data/nscl_test.RDS")
+> # stanfit = fit$stanfit
+> # 
+> # # stanfit$id_var   <- hifit$id_var
+> # # stanfit$time_var <- hifit$time_var
+> # # stanfit$basehaz  <- hifit$basehaz
+> # # stanfit$assoc    <- hifit$assoc
+> # # stanfit$terms    <- hifit$terms
+> # stanfit$formula    <- hifit$formula
+> # stanfit$id_list   <-  hifit$id_list
+> # stanfit$obs_list   <- hifit$obs_list
+> # 
+> # surv_train = fit$surv_train
+> # surv_test = fit$surv_test
+> # ldh_train = fit$nscl_ldh_train
+> # ldh_test = fit$nscl_ldh_test
+> # 
+> # dupe = ldh_test[,c('USUBJID','time')] # select columns to check duplicates
+> # une = unique( ldh_test[duplicated(dupe) | duplicated(dupe, fromLast=TRUE),] )
+> # ldh_test = ldh_test [!(duplicated(dupe) | duplicated(dupe, fromLast=TRUE) ),] 
+> # ldh_test = rbind(une, ldh_test)
+> # ldh_test = ldh_test[order(ldh_test$id, ldh_test$time), ]
+> # 
+> # length(unique(ldh_train$id))
+> # length(unique(surv_train$id))
+> # 
+> # 
+> # identical(unique(ldh_test$id) , unique(surv_test$id) )
+> # 
+> # tmat_mst <- mstate::trans.illdeath(names=c("diagnosis","progression","death"))
+> # test_msttte = mstate::msprep(time=c(NA,"dp_time","os_time"),
+> #                              status=c(NA,"dp_status","os_status"),
+> #                              data = surv_test,
+> #                              trans=tmat_mst, id = "id")
+> # 
+> # test_msttte = left_join(test_msttte, surv_test, by = "id")
+> # 
+> # surv_test_km = survival::survfit(Surv(os_time, os_status) ~ 1, data = surv_test)
+> # ## Survfit newdata
+> # msfit <- posterior_msttefit(object = fit$stanfit,
+> #                             newdataLong = ldh_test,
+> #                             newdataMs = test_msttte,
+> #                             times = 0,
+> #                             extrapolate = TRUE,
+> #                             condition = FALSE,
+> #                             control = list(edist =  median(surv_test_km$time)),
+> #                             last_time = median(surv_test_km$time),
+> #                             draws = 200,
+> #                             type = "cumhaz")
+> # 
+> # 
+> # 
+> # 
+> 
+> proc.time()
+     user    system   elapsed 
+19266.074    12.693  2868.975 

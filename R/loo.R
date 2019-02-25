@@ -13,9 +13,8 @@
 #'   it for an entire session.
 #'
 #' @aliases loo waic
-#'
 #' @export
-#'
+#' @method loo stanmstte
 #' @param x For \code{loo}, \code{waic}, and \code{kfold} methods, a fitted
 #'   model object returned by one of the rstanarm modeling functions. See
 #'   \link{stanreg-objects}.
@@ -152,7 +151,6 @@
 #'
 #' @importFrom loo loo loo.function loo.matrix
 #' @importFrom magrittr "%>%"
-#'
 loo.stanmstte <-
   function(x,
            ...,
@@ -887,8 +885,9 @@ evaluate_log_haz <- function(times, basehaz, betas, betas_tde, aux,
   eta <- linear_predictor(betas, x)
   if ((!is.null(s)) && ncol(s))
     eta <- eta + linear_predictor(betas_tde, s)
+
   args <- nlist(times, basehaz, aux, intercept)
-  do.call(evaluate_log_basehaz, args) + eta
+  mean(do.call(evaluate_log_basehaz, args)) + apply(eta, 2, mean)
 }
 
 evaluate_basehaz <- function(times, basehaz, aux, intercept = NULL) {
@@ -927,10 +926,15 @@ log_basesurv_ms <- function(x, coefs, basis) {
   -linear_predictor(coefs, basis_matrix(x, basis = basis, integrate = TRUE))
 }
 
-evaluate_log_surv <- function(times, basehaz, betas, aux, intercept = NULL, x, ...) {
+evaluate_log_surv <- function(times, basehaz, betas, aux, intercept = NULL, x, means = FALSE, ...) {
   eta  <- linear_predictor(betas, x)
   args <- nlist(times, basehaz, aux,  intercept)
-  do.call(evaluate_log_basesurv, args) * exp(eta)
+  if(means){
+    out <- apply( do.call(evaluate_log_basesurv, args), 2, mean) * apply(eta, 2, mean)
+  } else {
+    out <- do.call(evaluate_log_basesurv, args) * exp(eta)
+  }
+  out
 }
 
 #---------------

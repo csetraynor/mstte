@@ -288,6 +288,126 @@ validate_k_threshold <- function(k) {
   }
 }
 
+# Invert 'is.null'
+not.null <- function(x) { !is.null(x) }
+
+# Check for scalar or string
+is.scalar <- function(x) { isTRUE(is.numeric(x)   && (length(x) == 1)) }
+is.string <- function(x) { isTRUE(is.character(x) && (length(x) == 1)) }
+
+
+# Method to truncate a numeric vector at defined limits
+#
+# @param con A numeric vector.
+# @param lower Scalar, the lower limit for the returned vector.
+# @param upper Scalar, the upper limit for the returned vector.
+# @return A numeric vector.
+truncate.numeric <- function(con, lower = NULL, upper = NULL) {
+  if (!is.null(lower)) con[con < lower] <- lower
+  if (!is.null(upper)) con[con > upper] <- upper
+  con
+}
+
+# Transpose only if 'x' is a vector
+transpose_vector <- function(x) {
+  if (is.vector(x)) return(t(x)) else return(x)
+}
+
+# Calculate the specified quantiles for each column of an array
+col_quantiles <- function(x, probs, na.rm = FALSE, return_matrix = FALSE) {
+  stopifnot(is.matrix(x) || is.array(x))
+  out <- lapply(probs, function(q) apply(x, 2, quantile, q, na.rm = na.rm))
+  if (return_matrix) do.call(cbind, out) else out
+}
+col_quantiles_ <- function(x, probs) {
+  col_quantiles(x, probs, na.rm = TRUE, return_matrix = TRUE)
+}
+
+# Mutate, similar to dplyr (ie. append a new variable(s) to the data frame)
+mutate <- function(x, ..., names_eval = FALSE, n = 4) {
+  dots <- list(...)
+  if (names_eval) { # evaluate names in parent frame
+    nms <- sapply(names(dots), function(x) eval.parent(as.name(x), n = n))
+  } else {
+    nms <- names(dots)
+  }
+  for (i in seq_along(dots))
+    x[[nms[[i]]]] <- dots[[i]]
+  x
+}
+mutate_ <- function(x, ...) mutate(x, ..., names_eval = TRUE, n = 5)
+
+
+# Sort the rows of a data frame based on the variables specified in dots.
+# (For convenience, any variables in ... that are not in the data frame
+# are ignored, rather than throwing an error - dangerous but convenient)
+#
+# @param x A data frame.
+# @param ... Character strings; names of the columns of 'x' on which to sort.
+# @param skip Logical, if TRUE then any strings in the ...'s that are not
+#   present as variables in the data frame are ignored, rather than throwing
+#   an error - somewhat dangerous, but convenient.
+# @return A data frame.
+row_sort <- function(x, ...) {
+  stopifnot(is.data.frame(x))
+  vars <- lapply(list(...), as.name) # convert string to name
+  x[with(x, do.call(order, vars)), , drop = FALSE]
+}
+
+# Order the cols of a data frame in the order specified in the dots. Any
+# remaining columns of 'x' are retained as is and included after the ... columns.
+#
+# @param x A data frame.
+# @param ... Character strings; the desired order of the columns of 'x' by name.
+# @param skip Logical, if TRUE then any strings in the ...'s that are not
+#   present as variables in the data frame are ignored, rather than throwing
+#   an error - somewhat dangerous, but convenient.
+# @return A data frame.
+col_sort <- function(x, ...) {
+  stopifnot(is.data.frame(x))
+  vars1 <- unlist(list(...))
+  vars2 <- setdiff(colnames(x), vars1) # select the leftover columns in x
+  x[, c(vars1, vars2), drop = FALSE]
+}
+
+# Calculate the specified quantiles for each column of an array
+col_quantiles <- function(x, probs, na.rm = FALSE, return_matrix = FALSE) {
+  stopifnot(is.matrix(x) || is.array(x))
+  out <- lapply(probs, function(q) apply(x, 2, quantile, q, na.rm = na.rm))
+  if (return_matrix) do.call(cbind, out) else out
+}
+col_quantiles_ <- function(x, probs) {
+  col_quantiles(x, probs, na.rm = TRUE, return_matrix = TRUE)
+}
+# Set row or column names on an object
+set_rownames <- function(x, names) { rownames(x) <- names; x }
+set_colnames <- function(x, names) { colnames(x) <- names; x }
+
+# Select rows or columns by name or index
+select_rows <- function(x, rows) { x[rows, , drop = FALSE] }
+select_cols <- function(x, cols) { x[, cols, drop = FALSE] }
+
+# Return an array or list with the time sequence used for posterior predictions
+#
+# @param increments An integer with the number of increments (time points) at
+#   which to predict the outcome for each individual
+# @param t0,t1 Numeric vectors giving the start and end times across which to
+#   generate prediction times
+# @param simplify Logical specifying whether to return each increment as a
+#   column of an array (TRUE) or as an element of a list (FALSE)
+get_time_seq <- function(increments, t0, t1, simplify = TRUE) {
+  val <- sapply(0:(increments - 1), function(x, t0, t1) {
+    t0 + (t1 - t0) * (x / (increments - 1))
+  }, t0 = t0, t1 = t1, simplify = simplify)
+  if (simplify && is.vector(val)) {
+    # need to transform if there is only one individual
+    val <- t(val)
+    rownames(val) <- if (!is.null(names(t0))) names(t0) else
+      if (!is.null(names(t1))) names(t1) else NULL
+  }
+  return(val)
+}
+
 
 # Split a vector or matrix into a specified number of segments and return
 # each segment as an element of a list. The matrix method allows splitting
@@ -1511,6 +1631,27 @@ rename_t_and_cauchy <- function(prior_stuff, has) {
          NA)
 }
 
+# Sample rows from a stanmat object
+#
+# @param object A stanreg object.
+# @param draws The number of draws/rows to sample from the stanmat.
+# @param default_draws Integer or NA. If 'draws' is NULL then the number of
+#   rows sampled from the stanmat is equal to
+#   min(default_draws, posterior_sample_size, na.rm = TRUE)
+# @return A matrix with 'draws' rows and 'ncol(stanmat)' columns.
+sample_stanmat <- function(object, draws = NULL, default_draws = NA) {
+  S <- posterior_sample_size(object)
+  if (is.null(draws))
+    draws <- min(default_draws, S, na.rm = TRUE)
+  if (draws > S)
+    stop2("'draws' should be <= posterior sample size (", S, ").")
+  stanmat <- as.matrix(object$stanfit)
+  if (isTRUE(draws < S)) {
+    stanmat <- sample_rows(stanmat, draws)
+  }
+  stanmat
+}
+
 
 
 # Set arguments for sampling
@@ -1586,3 +1727,44 @@ default_stan_control <- function(prior, adapt_delta = NULL,
   }
   nlist(adapt_delta, max_treedepth)
 }
+# Validate data argument
+#
+# Make sure that, if specified, data is a data frame. If data is not missing
+# then dimension reduction is also performed on variables (i.e., a one column
+# matrix inside a data frame is converted to a vector).
+#
+# @param data User's data argument
+# @param if_missing Object to return if data is missing/null
+# @return If no error is thrown, data itself is returned if not missing/null,
+#   otherwise if_missing is returned.
+#
+drop_redundant_dims <- function(data) {
+  drop_dim <- sapply(data, function(v) is.matrix(v) && NCOL(v) == 1)
+  data[, drop_dim] <- lapply(data[, drop_dim, drop=FALSE], drop)
+  return(data)
+}
+# Validate newdata argument for posterior_predict, log_lik, etc.
+#
+# Doesn't check if the correct variables are included (that's done in pp_data),
+# just that newdata is either NULL or a data frame with no missing values. Also
+# drops any unused dimensions in variables (e.g. a one column matrix inside a
+# data frame is converted to a vector).
+#
+# @param x User's 'newdata' argument
+# @return Either NULL or a data frame
+#
+validate_newdata <- function(x) {
+  if (is.null(x)) {
+    return(NULL)
+  }
+  if (!is.data.frame(x)) {
+    stop("If 'newdata' is specified it must be a data frame.", call. = FALSE)
+  }
+  if (any(is.na(x))) {
+    stop("NAs are not allowed in 'newdata'.", call. = FALSE)
+  }
+
+  x <- as.data.frame(x)
+  drop_redundant_dims(x)
+}
+
