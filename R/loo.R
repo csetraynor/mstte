@@ -317,7 +317,7 @@ ll_args.stanmstte <- function(object, newdata = NULL, ...) {
   # we reconstruct the design matrices even if no newdata, since it is
   # too much of a pain to store everything in the fitted model object
   # (e.g. w/ delayed entry, interval censoring, quadrature points, etc)
-  pp <- pp_data(object, newdata, times = t_end)
+  pp <- .pp_data_mstte(object, newdata, times = t_end)
 
   # returned object depends on quadrature not implemented
   if (any( object$has_quadrature) ){
@@ -480,56 +480,8 @@ log_lik.stanmstte <- function(object, newdata = NULL, ...) {
 get_model_data <- function(object, ...) UseMethod("get_model_data")
 
 # ---- pp_data
-get_model_data.stanmstte <- function(object, ...) {
-  validate_stanmstte_object(object)
-  terms <- terms(object)
-  row_nms <- lapply(object$model_frame, function(mf) {
-    row.names(mf)
-  })
-  lapply(seq_len(object$n_trans), function(n_t){
-    newdata <- get_all_vars(terms[[n_t]], object$data[[n_t]])[row_nms[[n_t]], , drop = FALSE]
-  })
-}
 
-get_model_data.stanmsjm <- function(object, ...) {
-  validate_stanmsjm_object(object)
-  M <- get_M(object)
-  terms <- terms(object, fixed.only = FALSE)
-  n_trans <- get_n_trans(object)
-  transition_labels <- get_transition_name(object)
-  
-  extra_vars <- lapply(1:M, function(m) {
-    # for each submodel loop over the four possible assoc  
-    # interaction formulas and collect any variables used
-    forms_m <- object$assoc["which_formulas",][[m]]
-    uapply(forms_m, function(x) {
-      if (length(x)) {
-        rownames(attr(terms.formula(x), "factors")) 
-      } else NULL
-    })
-  })
-  # also ensure that id_var is in the event data
-  for(n in seq_len(n_trans)){
-    extra_vars[[paste0(transition_labels[[n]])]] <- object$id_var
-  }
-  n_extra_vars <- length(extra_vars) + n_trans - 1
-  if (!identical(length(terms), length(extra_vars) ))
-    stop2("Bug found: terms and extra_vars should be same length.")
-  
-  # add the extra variables to the terms formula for each submodel
-  terms <- xapply(terms, extra_vars, FUN = function(x, y) {
-    lhs <- x[[2L]]
-    rhs <- deparse(x[[3L]], 500L)
-    if (!is.null(y))
-      rhs <- c(rhs, y)
-    reformulate(rhs, response = lhs)
-  })
-  
-  datas <- c(object$dataLong, list(object$dataEvent))
-
-}
-
-get_model_data <- function(object, m = NULL) {
+get_model_data.default <- function(object, m = NULL) {
   validate_stanmvreg_object(object)
   M <- get_M(object)
   terms <- terms(object, fixed.only = FALSE)
@@ -580,386 +532,54 @@ get_model_data <- function(object, m = NULL) {
 
 
 
-
-
-pp_data <-
-  function(object,
-           newdata = NULL,
-           re.form = NULL,
-           offset = NULL,
-           m = NULL,
-           ...) {
-    validate_stanmstte_object(object)
-    if (is.stanmstte(object)) {
-      return(.pp_data_mstte(object, newdata = newdata, ...))
-    }
-  }
-
-
-#------------------  for models fit using stan_mstte  -----------------------
-# Return the design matrices required for evaluating the linear predictor or
-# log-likelihood in post-estimation functions for a \code{stan_mstte} model
-
-.pp_data_mstte <- function(object,
-                          newdata = NULL,
-                          times   = NULL,
-                          at_quadpoints = FALSE,
-                          ...) {
-
-  formula <- object$formula
-  basehaz <- object$basehaz
-
-  if (is.null(newdata))
-    newdata <- get_model_data(object)
-
-  # flags
-  has_tde        <- object$has_tde
-  has_quadrature <- object$has_quadrature
-
-  # define dimensions and times for quadrature
-  if (any(has_quadrature) && at_quadpoints) {
-
-    # if (is.null(times))
-    #   stop("Bug found: 'times' must be specified.")
-    #
-    # # error check time variables
-    # if (!length(times) == nrow(newdata))
-    #   stop("Bug found: length of 'times' should equal number rows in the data.")
-    #
-    # # number of nodes
-    # qnodes <- object$qnodes
-    #
-    # # standardised weights and nodes for quadrature
-    # qq <- get_quadpoints(nodes = qnodes)
-    # qp <- qq$points
-    # qw <- qq$weights
-    #
-    # # quadrature points & weights, evaluated for each row of data
-    # pts <- uapply(qp, unstandardise_qpts, 0, times)
-    # wts <- uapply(qw, unstandardise_qwts, 0, times)
-    #
-    # # id vector for quadrature points
-    # ids <- rep(seq_along(times), times = qnodes)
-    #  not implemented
-
-  } else { # predictions don't require quadrature
-
-    pts    <- times
-    wts    <- lapply(times, function(t) rep(NA, length(t)) )
-    ids    <- if(!is.null(object$id_vars) ) object$id_vars else  lapply(object$model_frame, function(mf) {
-      row.names(mf)
-    })
-  }
-
-  # time-fixed predictor matrix
-  tf_form <- lapply(formula, function(f) reformulate_rhs(rhs(f$tf_form)) )
-  mf <- lapply(seq_len(object$n_trans), function(nt) make_model_frame(tf_form[[nt]], newdata[[nt]], check_constant = FALSE)$mf )
-  x  <- lapply(seq_len(object$n_trans), function(nt){
-    out <- make_x(tf_form[[nt]], mf[[nt]], xlevs= object$xlevs, check_constant = FALSE)$x
-    if(ncol(out) > 0){
-      colnames(out) <- append_trans(colnames(out), nt, object$transition_labels[nt])
-    }
-    out <- as.data.frame(out)
-    tibble::rownames_to_column(out, var = "id_for_passing_to__")
-  }  )
-  x <-  suppressMessages( Reduce(full_join_NA, x) )
-
-  if (any(has_quadrature) && at_quadpoints) {
-    # x <- rep_rows(x, times = qnodes)
-    # ni
-  }
-
-  # time-varying predictor matrix
-  if (any(has_tde) ) { # model has tde not implmented
-    # if (at_quadpoints) {
-    #   # expand covariate data
-    #   newdata <- rep_rows(newdata, times = qnodes)
-    # }
-    # if (all(is.na(pts))) {
-    #   # temporary replacement to avoid error in creating spline basis
-    #   pts_tmp <- rep(0, length(pts))
-    # } else {
-    #   # else use prediction times or quadrature points
-    #   pts_tmp <- pts
-    # }
-    # s <- make_s(formula = object$formula$td_form,
-    #             data    = newdata,
-    #             times   = pts_tmp,
-    #             xlevs   = object$xlevs)
-    # if (all(is.na(pts))) {
-    #   # if pts were all NA then replace the time-varying predictor
-    #   # matrix with all NA, but retain appropriate dimensions
-    #   s[] <- NaN
-    # }
-  } else { # model does not have tde
-    s <- matrix(0, length(pts), 0)
-  }
-
-  # return object
-  return(nlist(pts,
-               wts,
-               ids,
-               x,
-               s,
-               has_quadrature,
-               at_quadpoints,
-               qnodes = object$qnodes))
+get_model_data.stanmstte <- function(object, ...) {
+  validate_stanmstte_object(object)
+  terms <- terms(object)
+  row_nms <- lapply(object$model_frame, function(mf) {
+    row.names(mf)
+  })
+  lapply(seq_len(object$n_trans), function(n_t){
+    newdata <- get_all_vars(terms[[n_t]], object$data[[n_t]])[row_nms[[n_t]], , drop = FALSE]
+  })
 }
 
-
-
-#--------------------  for models fit using stan_jm  -----------------------
-
-# Return the design matrices required for evaluating the linear predictor or
-# log-likelihood in post-estimation functions for a \code{stan_jm} model.
-# Code is twiked to fit various transitions.
-# @param object A stanmvreg object
-# @param newdataLong A data frame or list of data frames with the new 
-#   covariate data for the longitudinal submodel
-# @param newdataEvent A data frame with the new covariate data for the
-#   event submodel
-# @param ids An optional vector of subject IDs specifying which individuals
-#   should be included in the returned design matrices.
-# @param etimes An optional vector of times at which the event submodel
-#   design matrices should be evaluated (also used to determine the 
-#   quadrature times). If NULL then times are taken to be the eventimes in
-#   the fitted object (if newdataEvent is NULL) or in newdataEvent.
-# @param long_parts,event_parts A logical specifying whether to return the
-#   design matrices for the longitudinal and/or event submodels.
-# @return A named list (with components M, Npat, ndL, ndE, yX, tZt, 
-#   yZnames, eXq, assoc_parts) 
-.pp_data_jm_ms <- function(object, newdataLong = NULL, newdataEvent = NULL, 
-                        ids = NULL, etimes = NULL, long_parts = TRUE, 
-                        event_parts = TRUE) {
+get_model_data.stanmsjm <- function(object, ...) {
+  validate_stanmsjm_object(object)
   M <- get_M(object)
-  id_var   <- object$id_var
-  time_var <- object$time_var
+  terms <- terms(object, fixed.only = FALSE)
+  n_trans <- get_n_trans(object)
+  transition_labels <- get_transition_name(object)
   
-  if (!is.null(newdataLong) || !is.null(newdataEvent))
-    newdatas <- validate_newdatas(object, newdataLong, newdataEvent)
-  
-  # prediction data for longitudinal submodels
-  ndL <- if (is.null(newdataLong)) 
-    get_model_data(object)[1:M] else newdatas[1:M]
-  
-  # prediction data for event submodel
-  ndE <- if (is.null(newdataEvent)) 
-    get_model_data(object)[["Event"]] else newdatas[["Event"]]   
-  
-  # possibly subset
-  if (!is.null(ids)) {
-    ndL <- subset_ids(object, ndL, ids)
-    ndE <- subset_ids(object, ndE, ids)
-  }
-  id_list <- unique(ndE[[id_var]]) # unique subject id list
-  
-  # evaluate the last known survival time and status
-  if (!is.null(newdataEvent) && is.null(etimes)) {
-    # prediction data for the event submodel was provided but  
-    # no event times were explicitly specified by the user, so
-    # they must be evaluated using the data frame
-    surv <- eval(formula(object, m = "Event")[[2L]], ndE)
-    etimes  <- unclass(surv)[,"time"]
-    estatus <- unclass(surv)[,"status"]    
-  } else if (is.null(etimes)) {
-    # if no prediction data was provided then event times are 
-    # taken from the fitted model
-    etimes  <- object$eventtime[as.character(id_list)]
-    estatus <- object$status[as.character(id_list)]
-  } else { 
-    # otherwise, event times ('etimes') are only directly specified for dynamic   
-    # predictions via posterior_survfit in which case the 'etimes' correspond 
-    # to the last known survival time and therefore we assume everyone has survived
-    # up to that point (ie, set estatus = 0 for all individuals), this is true 
-    # even if there is an event indicated in the data supplied by the user.
-    estatus <- rep(0, length(etimes))
-  }
-  res <- nlist(M, Npat = length(id_list), ndL, ndE)
-  
-  if (long_parts && event_parts)
-    lapply(ndL, function(x) {
-      if (!time_var %in% colnames(x)) 
-        STOP_no_var(time_var)
-      if (!id_var %in% colnames(x)) 
-        STOP_no_var(id_var)
-      if (any(x[[time_var]] < 0))
-        stop2("Values for the time variable (", time_var, ") should not be negative.")
-      mt <- tapply(x[[time_var]], factor(x[[id_var]]), max)
-      if (any(mt > etimes))
-        stop2("There appears to be observation times in the longitudinal data that ",
-              "are later than the event time specified in the 'etimes' argument.")      
-    }) 
-  
-  # response and design matrices for longitudinal submodels
-  if (long_parts) {
-    y <- lapply(1:M, function(m) eval(formula(object, m = m)[[2L]], ndL[[m]]))
-    ydat <- lapply(1:M, function(m) pp_data(object, ndL[[m]], m = m))
-    yX <- fetch(ydat, "x")
-    yZt <- fetch(ydat, "Zt")
-    yZ_names <- fetch(ydat, "Z_names")
-    flist <- lapply(ndL, function(x) factor(x[[id_var]]))
-    res <- c(res, nlist(y, yX, yZt, yZ_names, flist))
-  }
-  
-  # design matrices for event submodel and association structure
-  if (event_parts) {
-    qnodes <- object$qnodes
-    qq <- get_quadpoints(qnodes)
-    qtimes <- uapply(qq$points,  unstandardise_qpts, 0, etimes)
-    qwts   <- uapply(qq$weights, unstandardise_qwts, 0, etimes)
-    starttime <- deparse(formula(object, m = "Event")[[2L]][[2L]])
-    edat <- prepare_data_table(ndE, id_var, time_var = starttime)
-    id_rep <- rep(id_list, qnodes + 1)
-    times <- c(etimes, qtimes) # times used to design event submodel matrices
-    edat <- rolling_merge(edat, ids = id_rep, times = times)
-    eXq  <- .pp_data_mer_x(object, newdata = edat, m = "Event")
-    assoc_parts <- lapply(1:M, function(m) {
-      ymf <- ndL[[m]]
-      grp_stuff <- object$grp_stuff[[m]]
-      if (grp_stuff$has_grp) {
-        grp_stuff <- get_extra_grp_info( # update grp_info with new data
-          grp_stuff, flist = ymf, id_var = id_var, 
-          grp_assoc = grp_stuff$grp_assoc)
-      }
-      ymf <- prepare_data_table(ymf, id_var = id_var, time_var = time_var,
-                                grp_var = grp_stuff$grp_var)
-      make_assoc_parts(
-        ymf, assoc = object$assoc[,m], id_var = id_var, time_var = time_var, 
-        ids = id_rep, times = times, grp_stuff = grp_stuff,
-        use_function = pp_data, object = object, m = m)
+  extra_vars <- lapply(1:M, function(m) {
+    # for each submodel loop over the four possible assoc  
+    # interaction formulas and collect any variables used
+    forms_m <- object$assoc["which_formulas",][[m]]
+    uapply(forms_m, function(x) {
+      if (length(x)) {
+        rownames(attr(terms.formula(x), "factors")) 
+      } else NULL
     })
-    assoc_attr <- nlist(.Data = assoc_parts, qnodes, qtimes, qwts, etimes, estatus)
-    assoc_parts <- do.call("structure", assoc_attr)
-    res <- c(res, nlist(eXq, assoc_parts))
+  })
+  # also ensure that id_var is in the event data
+  for(n in seq_len(n_trans)){
+    extra_vars[[paste0(transition_labels[[n]])]] <- object$id_var
   }
+  n_extra_vars <- length(extra_vars) + n_trans - 1
+  if (!identical(length(terms), length(extra_vars) ))
+    stop2("Bug found: terms and extra_vars should be same length.")
   
-  return(res)
+  # add the extra variables to the terms formula for each submodel
+  terms <- xapply(terms, extra_vars, FUN = function(x, y) {
+    lhs <- x[[2L]]
+    rhs <- deparse(x[[3L]], 500L)
+    if (!is.null(y))
+      rhs <- c(rhs, y)
+    reformulate(rhs, response = lhs)
+  })
+  
+  datas <- c(object$dataLong, list(object$dataEvent))
+
 }
-
-
-#--------------------  for models fit using stan_jm  -----------------------
-
-# Return the design matrices required for evaluating the linear predictor or
-# log-likelihood in post-estimation functions for a \code{stan_jm} model
-#
-# @param object A stanmvreg object
-# @param newdataLong A data frame or list of data frames with the new 
-#   covariate data for the longitudinal submodel
-# @param newdataEvent A data frame with the new covariate data for the
-#   event submodel
-# @param ids An optional vector of subject IDs specifying which individuals
-#   should be included in the returned design matrices.
-# @param etimes An optional vector of times at which the event submodel
-#   design matrices should be evaluated (also used to determine the 
-#   quadrature times). If NULL then times are taken to be the eventimes in
-#   the fitted object (if newdataEvent is NULL) or in newdataEvent.
-# @param long_parts,event_parts A logical specifying whether to return the
-#   design matrices for the longitudinal and/or event submodels.
-# @return A named list (with components M, Npat, ndL, ndE, yX, tZt, 
-#   yZnames, eXq, assoc_parts) 
-.pp_data_jm2 <- function(object, newdataLong = NULL, newdataEvent = NULL, 
-                        ids = NULL, etimes = NULL, long_parts = TRUE, 
-                        event_parts = TRUE) {
-  M <- get_M(object)
-  id_var   <- object$id_var
-  time_var <- object$time_var
-  
-  # prediction data for longitudinal submodels
-  ndL <- newdataLong
-  
-  # prediction data for event submodel
-  ndE <- newdataEvent
-  
-  # possibly subset
-  if (!is.null(ids)) {
-    ndL <- subset_ids(object, ndL, ids)
-    ndE <- subset_ids(object, ndE, ids)
-  }
-  id_list <- unique(ndE[[id_var]]) # unique subject id list
-  
-  # evaluate the last known survival time and status
-  if (!is.null(newdataEvent) && is.null(etimes)) {
-    # prediction data for the event submodel was provided but  
-    # no event times were explicitly specified by the user, so
-    # they must be evaluated using the data frame
-    surv <- eval(formula(object, m = "Event")[[2L]], ndE)
-    etimes  <- unclass(surv)[,"time"]
-    estatus <- unclass(surv)[,"status"]    
-  } else if (is.null(etimes)) {
-    # if no prediction data was provided then event times are 
-    # taken from the fitted model
-    etimes  <- object$eventtime[as.character(id_list)]
-    estatus <- object$status[as.character(id_list)]
-  } else { 
-    # otherwise, event times ('etimes') are only directly specified for dynamic   
-    # predictions via posterior_survfit in which case the 'etimes' correspond 
-    # to the last known survival time and therefore we assume everyone has survived
-    # up to that point (ie, set estatus = 0 for all individuals), this is true 
-    # even if there is an event indicated in the data supplied by the user.
-    estatus <- rep(0, length(etimes))
-  }
-  res <- nlist(M, Npat = length(id_list), ndL, ndE)
-  
-  if (long_parts && event_parts)
-    lapply(ndL, function(x) {
-      if (!time_var %in% colnames(x)) 
-        STOP_no_var(time_var)
-      if (!id_var %in% colnames(x)) 
-        STOP_no_var(id_var)
-      if (any(x[[time_var]] < 0))
-        stop2("Values for the time variable (", time_var, ") should not be negative.")
-      mt <- tapply(x[[time_var]], factor(x[[id_var]]), max)
-      if (any(mt > etimes))
-        stop2("There appears to be observation times in the longitudinal data that ",
-              "are later than the event time specified in the 'etimes' argument.")      
-    }) 
-  
-  # response and design matrices for longitudinal submodels
-  if (long_parts) {
-    y <- lapply(1:M, function(m) eval(formula(object, m = m)[[2L]], ndL[[m]]))
-    ydat <- lapply(1:M, function(m) pp_data(object, ndL[[m]], m = m))
-    yX <- fetch(ydat, "x")
-    yZt <- fetch(ydat, "Zt")
-    yZ_names <- fetch(ydat, "Z_names")
-    flist <- lapply(ndL, function(x) factor(x[[id_var]]))
-    res <- c(res, nlist(y, yX, yZt, yZ_names, flist))
-  }
-  
-  # design matrices for event submodel and association structure
-  if (event_parts) {
-    qnodes <- 15L
-    qq <- get_quadpoints(qnodes)
-    qtimes <- uapply(qq$points,  unstandardise_qpts, 0, etimes)
-    qwts   <- uapply(qq$weights, unstandardise_qwts, 0, etimes)
-    starttime <- deparse(formula(object, m = "Event")[[2L]][[2L]])
-    edat <- prepare_data_table(ndE, id_var, time_var = starttime)
-    id_rep <- rep(id_list, qnodes + 1)
-    times <- c(etimes, qtimes) # times used to design event submodel matrices
-    edat <- rolling_merge(edat, ids = id_rep, times = times)
-    eXq  <- .pp_data_mer_x(object, newdata = edat, m = "Event")
-    assoc_parts <- lapply(1:M, function(m) {
-      ymf <- ndL[[m]]
-      grp_stuff <- object$grp_stuff[[m]]
-      if (grp_stuff$has_grp) {
-        grp_stuff <- get_extra_grp_info( # update grp_info with new data
-          grp_stuff, flist = ymf, id_var = id_var, 
-          grp_assoc = grp_stuff$grp_assoc)
-      }
-      ymf <- prepare_data_table(ymf, id_var = id_var, time_var = time_var,
-                                grp_var = grp_stuff$grp_var)
-      make_assoc_parts(
-        ymf, assoc = object$assoc[,m], id_var = id_var, time_var = time_var, 
-        ids = id_rep, times = times, grp_stuff = grp_stuff,
-        use_function = pp_data, object = object, m = m)
-    })
-    assoc_attr <- nlist(.Data = assoc_parts, qnodes, qtimes, qwts, etimes, estatus)
-    assoc_parts <- do.call("structure", assoc_attr)
-    res <- c(res, nlist(eXq, assoc_parts))
-  }
-  
-  return(res)
-}
-
 
 # get log likelihood function for a particular model
 # @param x stanreg object

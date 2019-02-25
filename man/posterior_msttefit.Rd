@@ -17,8 +17,8 @@ posterior_msttefit(object, ...)
 \method{posterior_msttefit}{stanmsjm}(object, newdataLong = NULL,
   newdataMs = NULL, extrapolate = TRUE, control = list(),
   condition = NULL, last_time = NULL, prob = 0.95, ids,
-  times = NULL, standardise = FALSE, dynamic = TRUE, scale = 1.5,
-  draws = NULL, seed = NULL, ...)
+  times = NULL, standardise = FALSE, time_start_var = NULL,
+  dynamic = TRUE, scale = 1.5, draws = NULL, seed = NULL, ...)
 }
 \arguments{
 \item{...}{Currently unused.}

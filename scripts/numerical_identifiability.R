@@ -13,7 +13,7 @@ gammas12_t = 2.5
 cens = c(4.5, 5.5)
 
 set.seed(9911)
-covs <- data.frame(id = 1:1000, trt = stats::rbinom(1000, 1L, 0.5))
+covs <- data.frame(id = 1:100, trt = stats::rbinom(100, 1L, 0.5))
 
 sim_wei <- rsimid(
   dist01 = "weibull",
@@ -47,13 +47,12 @@ formula = lapply(1:3, function (x)
 
 basehaz = lapply(1:3, function(x)
   "weibull")
-basehaz[[1]] = "ms"
 
 prior_intercept = lapply(1:3, function(x)
   rstanarm::normal() )
 
 prior_aux = lapply(1:3, function(x)
-  rstanarm::normal() )
+  rstanarm::cauchy() )
 
 options(mc.cores = 4)
 stanfit <- mstte_stan(formula = formula,
@@ -64,12 +63,12 @@ stanfit <- mstte_stan(formula = formula,
                         rstanarm::normal() ),
                       prior_intercept = prior_intercept,
                       prior_aux       = prior_aux,
-                      iter = 2000,
-                      chains = 4,
+                      iter = 1,
+                      chains = 1,
                       control = list(adapt_delta = 0.99)
 )
 
-
+saveRDS(nlist(stanfit,sim_wei_mstate ), "~/rfactory/mstte-data/baseline_sim.RDS")
 ##########################################
 
 

@@ -469,8 +469,7 @@ posterior_msttefit.stanmstte <- function(object,
 #'
 posterior_msttefit.stanmsjm <- function(object, newdataLong = NULL, newdataMs = NULL,
                                      extrapolate = TRUE, control = list(), 
-                                     condition = NULL, last_time = NULL, prob = 0.95, 
-                                     ids, times = NULL, standardise = FALSE, 
+                                     condition = NULL, last_time = NULL, prob = 0.95,  ids, times = NULL, standardise = FALSE, time_start_var = NULL,
                                      dynamic = TRUE, scale = 1.5,
                                      draws = NULL, seed = NULL, ...) {
   validate_stanmsjm_object(object)
@@ -513,7 +512,7 @@ posterior_msttefit.stanmsjm <- function(object, newdataLong = NULL, newdataMs = 
       stop2("Marginalised predictions for the event outcome are ",
             "not currently implemented.")
     has_newdata <- not.null(newdataMs)
-    newdatas <- validate_newdatas(object, newdataLong, newdataMs)
+    newdatas <- validate_newdatas_ms(object, newdataLong, newdataMs)
     ndL <- newdatas[1:M]
     ndMS <- newdatas[(M+1):(M+n_trans)]  
   }
@@ -521,9 +520,10 @@ posterior_msttefit.stanmsjm <- function(object, newdataLong = NULL, newdataMs = 
     newdataMs_list <- lapply(seq_len(n_trans), function(i) newdataMs[newdataMs[["trans"]] == i, ])
     id_list <- lapply(newdataMs_list, function(x) extract_id(x, id_var))
     
-    if(missing(time_start_var) & !("TStart" %in% colnames(newdataMs)) ){
+    if(is.null(time_start_var) & !("Tstart" %in% colnames(newdataMs)) ){
       stop2("Provide a column name from newdataMS with time start variable.")
-    } else if(missing(time_start_var) ){
+    } else if(is.null(time_start_var) ){
+      warning2("Setting time_start_var to Tstart.")
       time_start_var <- "Tstart"
     }
     obs_list <-  mapply(FUN = match_obs,
@@ -648,7 +648,7 @@ posterior_msttefit.stanmsjm <- function(object, newdataLong = NULL, newdataMs = 
   # Draw b pars for new individuals
   if (dynamic && !is.null(newdataMs)) {
     stanmat <- lapply(1:2, function(h) {
-      simulate_b_pars(object, stanmat = stanmat, ndL = ndL, ndE = ndMS[[h]],  ids = id_list[[h]], times = last_time[[h]], scale = scale) })
+      simulate_b_pars_ms(object, stanmat = stanmat, ndL = ndL, ndE = ndMS[h],  ids = id_list[[h]], times = last_time[[h]], scale = scale) })
     b_new <- attr(stanmat, "b_new")
     acceptance_rate <- attr(stanmat, "acceptance_rate")
   }

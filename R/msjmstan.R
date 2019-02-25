@@ -63,6 +63,7 @@ msjmstan <- function(object) {
     id_list   = object$id_list,
     obs_list  = object$obs_list,
     n_grps    = object$n_grps,
+    grp_stuff = object$grp_stuff,
     n_yobs    = list_nms(object$n_yobs, M, stub),
     family    = list_nms(object$family, M, stub),
     glmod     = list_nms(object$glmod, M, stub),

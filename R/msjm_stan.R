@@ -1303,6 +1303,7 @@ msjm_stan <- function(formulaLong,
                         basic_info = grp_basic,
                         flist  = fetch(y_mod, "z", "group_list"),
                         args   = nlist(id_var, grp_assoc, ok_assoc_grp))
+    
     has_grp <- fetch_(grp_stuff, "has_grp")
     if (not.null(grp_assoc) && !any(has_grp))
       stop2("'grp_assoc' can only be specified when there is a grouping ",
@@ -1827,6 +1828,7 @@ msjm_stan <- function(formulaLong,
                n_subjects, 
                n_yobs, 
                epsilon,
+               auc_qnodes,
                algorithm, 
                terms,
                glmod = y_mod,

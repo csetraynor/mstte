@@ -15,7 +15,7 @@
 # @param ids A vector of unique IDs for the individuals in the prediction data.
 # @param times A vector of last known survival times for the individuals in the 
 #   prediction data.
-simulate_b_pars_ms <- function(object, stanmat, ndL, ndMS, ids, times, scale = 1.5) {
+simulate_b_pars_ms <- function(object, stanmat, ndL, ndE, ids, times, scale = 1.5) {
   
   # Preliminaries and dimensions
   p <- .p(object) # num of b pars for each grouping factor
@@ -39,9 +39,6 @@ simulate_b_pars_ms <- function(object, stanmat, ndL, ndMS, ids, times, scale = 1
   
   # Obtain a list with the posterior means for each parameter
   pars_means <- extract_pars(object, means = TRUE) 
-  ids <- ids[[1]]
-  ndE <- ndMS[[1]]
-  times <- times[[1]]
   # Simulate new b pars
   cat("Drawing new random effects for", length(ids), "individuals. ")
   cat("Monitoring progress:\n")
@@ -57,7 +54,7 @@ simulate_b_pars_ms <- function(object, stanmat, ndL, ndMS, ids, times, scale = 1
     mat <- matrix(NA, nrow(stanmat), len)
     
     # Design matrices for individual i only
-    dat_i <- .pp_data_jm(object, ndL, ndE, etimes = times[[i]], ids = ids[[i]])
+    dat_i <- .pp_data_jm2(object, ndL, ndE, etimes = times[[i]], ids = ids[[i]])
     if (has_two_grp_factors) {
       dat_i$Ni <- b2_n[ids[[i]]]
     }
@@ -65,6 +62,7 @@ simulate_b_pars_ms <- function(object, stanmat, ndL, ndMS, ids, times, scale = 1
     # based on asymptotic assumptions, used as center and width of proposal
     # distribution in MH algorithm
     inits <- rep(0, len)
+
     val <- optim(inits, optim_fn, object = object, data = dat_i, 
                  pars = pars_means, method = "BFGS", hessian = TRUE)
     mu_i <- val$par                       # asymptotic mode of posterior
@@ -104,6 +102,7 @@ simulate_b_pars_ms <- function(object, stanmat, ndL, ndMS, ids, times, scale = 1
 # @param data Output from .pp_data_jm
 # @param pars Output from extract_pars
 optim_fn <- function(b, object, data, pars) {
+  browser()
   nms <- lapply(data$assoc_parts, function(x) x$mod_eta$Z_names)
   pars <- substitute_b_pars(object, data, pars, new_b = b, new_Z_names = nms)
   ll <- .ll_jm(object, data, pars, include_b = TRUE)
@@ -146,6 +145,7 @@ mh_step <- function(b_old, mu, sigma, df, object, data, pars) {
 #   for the new b pars.
 substitute_b_pars <- function(object, data, pars, new_b, new_Z_names) {
   M <- get_M(object)
+  browser()
   if (!is(new_b, "list")) { # split b into submodels
     if (M == 1) {
       new_b <- list(new_b)
@@ -184,156 +184,6 @@ substitute_b_pars <- function(object, data, pars, new_b, new_Z_names) {
 }
 
 
-# Return the design matrices required for evaluating the linear predictor or
-# log-likelihood in post-estimation functions for a \code{stan_jm} model
-#
-# @param object A stanmvreg object
-# @param newdataLong A data frame or list of data frames with the new 
-#   covariate data for the longitudinal submodel
-# @param newdataEvent A data frame with the new covariate data for the
-#   event submodel
-# @param ids An optional vector of subject IDs specifying which individuals
-#   should be included in the returned design matrices.
-# @param etimes An optional vector of times at which the event submodel
-#   design matrices should be evaluated (also used to determine the 
-#   quadrature times). If NULL then times are taken to be the eventimes in
-#   the fitted object (if newdataEvent is NULL) or in newdataEvent.
-# @param long_parts,event_parts A logical specifying whether to return the
-#   design matrices for the longitudinal and/or event submodels.
-# @return A named list (with components M, Npat, ndL, ndE, yX, tZt, 
-#   yZnames, eXq, assoc_parts) 
-.pp_data_jm <- function(object, newdataLong = NULL, newdataEvent = NULL, 
-                        ids = NULL, etimes = NULL, long_parts = TRUE, 
-                        event_parts = TRUE) {
-  M <- get_M(object)
-  id_var   <- object$id_var
-  time_var <- object$time_var
-  
-  if (!is.null(newdataLong) || !is.null(newdataEvent))
-    newdatas <- validate_newdatas(object, newdataLong, newdataEvent)
-  
-  # prediction data for longitudinal submodels
-  ndL <- if (is.null(newdataLong)) 
-    get_model_data(object)[1:M] else newdatas[1:M]
-  
-  # prediction data for event submodel
-  ndE <- if (is.null(newdataEvent)) 
-    get_model_data(object)[["Event"]] else newdatas[["Event"]]   
-  
-  # possibly subset
-  if (!is.null(ids)) {
-    ndL <- subset_ids(object, ndL, ids)
-    ndE <- subset_ids(object, ndE, ids)
-  }
-  id_list <- unique(ndE[[id_var]]) # unique subject id list
-  
-  # evaluate the last known survival time and status
-  if (!is.null(newdataEvent) && is.null(etimes)) {
-    # prediction data for the event submodel was provided but  
-    # no event times were explicitly specified by the user, so
-    # they must be evaluated using the data frame
-    surv <- eval(formula(object, m = "Event")[[2L]], ndE)
-    etimes  <- unclass(surv)[,"time"]
-    estatus <- unclass(surv)[,"status"]    
-  } else if (is.null(etimes)) {
-    # if no prediction data was provided then event times are 
-    # taken from the fitted model
-    etimes  <- object$eventtime[as.character(id_list)]
-    estatus <- object$status[as.character(id_list)]
-  } else { 
-    # otherwise, event times ('etimes') are only directly specified for dynamic   
-    # predictions via posterior_survfit in which case the 'etimes' correspond 
-    # to the last known survival time and therefore we assume everyone has survived
-    # up to that point (ie, set estatus = 0 for all individuals), this is true 
-    # even if there is an event indicated in the data supplied by the user.
-    estatus <- rep(0, length(etimes))
-  }
-  res <- nlist(M, Npat = length(id_list), ndL, ndE)
-  
-  if (long_parts && event_parts)
-    lapply(ndL, function(x) {
-      if (!time_var %in% colnames(x)) 
-        STOP_no_var(time_var)
-      if (!id_var %in% colnames(x)) 
-        STOP_no_var(id_var)
-      if (any(x[[time_var]] < 0))
-        stop2("Values for the time variable (", time_var, ") should not be negative.")
-      mt <- tapply(x[[time_var]], factor(x[[id_var]]), max)
-      if (any(mt > etimes))
-        stop2("There appears to be observation times in the longitudinal data that ",
-              "are later than the event time specified in the 'etimes' argument.")      
-    }) 
-  
-  # response and design matrices for longitudinal submodels
-  if (long_parts) {
-    y <- lapply(1:M, function(m) eval(formula(object, m = m)[[2L]], ndL[[m]]))
-    ydat <- lapply(1:M, function(m) pp_data(object, ndL[[m]], m = m))
-    yX <- fetch(ydat, "x")
-    yZt <- fetch(ydat, "Zt")
-    yZ_names <- fetch(ydat, "Z_names")
-    flist <- lapply(ndL, function(x) factor(x[[id_var]]))
-    res <- c(res, nlist(y, yX, yZt, yZ_names, flist))
-  }
-  
-  # design matrices for event submodel and association structure
-  if (event_parts) {
-    qnodes <- object$qnodes
-    qq <- get_quadpoints(qnodes)
-    qtimes <- uapply(qq$points,  unstandardise_qpts, 0, etimes)
-    qwts   <- uapply(qq$weights, unstandardise_qwts, 0, etimes)
-    starttime <- deparse(formula(object, m = "Event")[[2L]][[2L]])
-    edat <- prepare_data_table(ndE, id_var, time_var = starttime)
-    id_rep <- rep(id_list, qnodes + 1)
-    times <- c(etimes, qtimes) # times used to design event submodel matrices
-    edat <- rolling_merge(edat, ids = id_rep, times = times)
-    eXq  <- .pp_data_mer_x(object, newdata = edat, m = "Event")
-    assoc_parts <- lapply(1:M, function(m) {
-      ymf <- ndL[[m]]
-      grp_stuff <- object$grp_stuff[[m]]
-      if (grp_stuff$has_grp) {
-        grp_stuff <- get_extra_grp_info( # update grp_info with new data
-          grp_stuff, flist = ymf, id_var = id_var, 
-          grp_assoc = grp_stuff$grp_assoc)
-      }
-      ymf <- prepare_data_table(ymf, id_var = id_var, time_var = time_var,
-                                grp_var = grp_stuff$grp_var)
-      make_assoc_parts(
-        ymf, assoc = object$assoc[,m], id_var = id_var, time_var = time_var, 
-        ids = id_rep, times = times, grp_stuff = grp_stuff,
-        use_function = pp_data, object = object, m = m)
-    })
-    assoc_attr <- nlist(.Data = assoc_parts, qnodes, qtimes, qwts, etimes, estatus)
-    assoc_parts <- do.call("structure", assoc_attr)
-    res <- c(res, nlist(eXq, assoc_parts))
-  }
-  
-  return(res)
-}
-
-# the functions below are heavily based on a combination of 
-# lme4:::predict.merMod and lme4:::mkNewReTrms, although they do also have 
-# substantial modifications
-.pp_data_mer_x <- function(object, newdata, m = NULL, ...) {
-  x <- get_x(object, m = m)
-  if (is.null(newdata)) return(x)
-  form <- if (is.null(m)) attr(object$glmod$fr, "formula") else 
-    formula(object, m = m)
-  L <- length(form)
-  form[[L]] <- lme4::nobars(form[[L]])
-  RHS <- formula(substitute(~R, list(R = form[[L]])))
-  Terms <- terms(object, m = m)
-  mf <- model.frame(object, m = m)
-  ff <- formula(form)
-  vars <- rownames(attr(terms.formula(ff), "factors"))
-  mf <- mf[vars]
-  isFac <- vapply(mf, is.factor, FUN.VALUE = TRUE)
-  isFac[attr(Terms, "response")] <- FALSE
-  orig_levs <- if (length(isFac) == 0) 
-    NULL else lapply(mf[isFac], levels)
-  mfnew <- model.frame(delete.response(Terms), newdata, xlev = orig_levs)
-  x <- model.matrix(RHS, data = mfnew, contrasts.arg = attr(x, "contrasts"))
-  return(x)
-}
 # Draw new group-specific parameters
 #
 # Run a Metropolis-Hastings algorithm to draw group-specific parameters for new

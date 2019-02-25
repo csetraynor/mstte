@@ -976,6 +976,13 @@ get_y.stanmstte <- function(object, ind, ...) {
   }
 }
 #' @export
+get_x.stanmsjm <- function(object,  m = NULL, ...) {
+  ret <- fetch(object$glmod, "x", "x") %ORifNULL% stop("X not found")
+  stub <- get_stub(object)
+  if (!is.null(m)) ret[[m]] else list_nms(ret, stub = stub)
+}
+
+#' @export
 get_x.default <- function(object, ind, ...) {
   object[["x"]][[ind]] %ORifNULL% model.matrix(object)
 }
@@ -1096,7 +1103,7 @@ validate_stanmsjm_object <- function(x, call. = FALSE) {
 
 # Validate newdataLong and newdataEvent arguments
 #
-# @param object A stanmvreg object
+# @param object A stanmsjm object
 # @param newdataLong A data frame, or a list of data frames
 # @param newdataEvent A data frame
 # @param duplicate_ok A logical. If FALSE then only one row per individual is
@@ -1104,7 +1111,7 @@ validate_stanmsjm_object <- function(x, call. = FALSE) {
 # @param response A logical specifying whether the longitudinal response
 #   variable must be included in the new data frame
 # @return A list of validated data frames
-validate_newdatas <- function(object, newdataLong = NULL, newdataMs = NULL,
+validate_newdatas_ms <- function(object, newdataLong = NULL, newdataMs = NULL,
                               duplicate_ok = FALSE, response = TRUE) {
   #validate_stanmstte_object(object) | validate_stanmsjm_object(object)
   id_var <- object$id_var
@@ -1187,7 +1194,7 @@ validate_newdatas <- function(object, newdataLong = NULL, newdataMs = NULL,
 # @param response A logical specifying whether the longitudinal response
 #   variable must be included in the new data frame
 # @return A list of validated data frames
-validate_newdatas2 <- function(object, newdataLong = NULL, newdataEvent = NULL,
+validate_newdatas <- function(object, newdataLong = NULL, newdataEvent = NULL,
                               duplicate_ok = FALSE, response = TRUE) {
   #validate_stanmvreg_object(object)
   id_var <- object$id_var
