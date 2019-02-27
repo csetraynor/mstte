@@ -98,3 +98,122 @@
                qnodes = object$qnodes))
 }
 
+
+.pp_data_surv <- function(object, newdata, times, type = "surv", ...) {
+  dots <- list(...)
+  h <- dots$h
+
+
+  formula <- object$formula[[h]]
+  basehaz <- object$basehaz[[h]]
+
+  if (is.null(newdata))
+    newdata <- object$model_data # --> need to create get_model_data method?...
+
+  #----- check for delayed entry
+
+  # throw error if delayed entry is present in prediction data
+  if (uses.start.stop(object, h)) {
+    check <- try({
+      mf_tmp <- make_model_frame(formula$lhs_form, newdata)$mf
+      t_beg <- make_t(mf_tmp, type = "beg")
+      if (any(!t_beg == 0))
+        stop2("'posterior_survfit' cannot handle non-zero start times.")
+    })
+  }
+
+  # return status indicator if being used for log likelihood evaluation
+  if (type == "ll") {
+    mf_tmp <- make_model_frame(formula$lhs_form, newdata)$mf
+    status <- make_d(mf_tmp)
+  }
+
+  # otherwise assume one row per individual, with no delayed entry
+  # (i.e. all t_beg = 0)
+  mf <- make_model_frame(formula$tf_form, newdata)$mf
+
+  #----- define dimensions and times for quadrature
+
+  # flags
+  has_tde        <- object$has_tde[h]
+  has_quadrature <- object$has_quadrature[h]
+
+  if (has_quadrature) { # model uses quadrature
+
+    # number of nodes
+    qnodes <- object$qnodes
+
+    # standardised weights and nodes for quadrature
+    qq <- get_quadpoints(nodes = qnodes)
+    qp <- qq$points
+    qw <- qq$weights
+
+    # quadrature points & weights, evaluated for each row of data
+    qpts <- uapply(qp, unstandardise_qpts, 0, times) # qpts for exit time
+    qwts <- uapply(qw, unstandardise_qwts, 0, times) # qwts for exit time
+
+  }
+
+  #----- basis terms for baseline hazard
+
+  if (!has_quadrature) {
+    basis  <- make_basis(times, basehaz)
+    ibasis <- make_basis(times, basehaz, integrate = TRUE)
+  } else {
+    basis      <- make_basis(times, basehaz)
+    basis_qpts <- make_basis(qpts, basehaz)
+  }
+
+  #----- predictor matrices
+
+  # time-fixed predictor matrix
+  x <- make_x(formula$tf_form, mf, xlevs = object$xlevs)$x
+
+  if (has_quadrature)
+    x_qpts <- rep_rows(x, times = qnodes)
+
+  # time-varying predictor matrix
+  if (has_tde) {
+    s      <- make_s(formula = object$formula$td_form,
+                     data    = newdata,
+                     times   = times,
+                     xlevs   = object$xlevs)
+    s_qpts <- make_s(formula = object$formula$td_form,
+                     data    = rep_rows(newdata, times = qnodes),
+                     times   = qpts,
+                     xlevs   = object$xlevs)
+  } else if (has_quadrature) { # model does not have tde
+    s      <- matrix(0,length(times),0)
+    s_qpts <- matrix(0,length(qpts) ,0)
+  }
+
+  if (has_quadrature) {
+    return(nlist(times,
+                 qpts,
+                 qwts,
+                 x,
+                 x_qpts,
+                 s,
+                 s_qpts,
+                 basis,
+                 basis_qpts,
+                 has_quadrature,
+                 status = if (type == "ll") status else NULL))
+  } else {
+    return(nlist(times,
+                 x,
+                 basis,
+                 ibasis,
+                 has_quadrature,
+                 status = if (type == "ll") status else NULL))
+  }
+}
+# Checks for the type of survival response, and whether the prediction
+# call therefore requires an id variable identifying individuals
+#
+# @param object A stansurv object.
+# @return A logical.
+uses.tde        <- function(object) { object$has_tde }
+uses.start.stop <- function(object, k) {
+  object$formula[[k]]$surv_type == "counting" }
+requires.idvar  <- function(object) { uses.start.stop(object) || uses.tde(object) }

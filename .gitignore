@@ -36,7 +36,9 @@ vignettes/*.pdf
 rsconnect/
 .Rproj.user
 
-# compiled and scp
-*.o
+# compiled stan files
+src/stan_files/*.o
+
+# scp files
 *.sh
 *out

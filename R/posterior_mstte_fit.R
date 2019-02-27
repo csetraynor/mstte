@@ -1,22 +1,4 @@
-# Part of the rstanarm package for estimating model parameters
-# Copyright (C) 2015, 2016, 2017 Trustees of Columbia University
-# Copyright (C) 2016, 2017 Sam Brilleman
-#
-# This program is free software; you can redistribute it and/or
-# modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 3
-# of the License, or (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-
-#' Posterior predictions for survival models
+#' Posterior predictions for mstte models
 #'
 #' This function allows us to generate predicted quantities for survival
 #' models at specified times. These quantities include the
@@ -323,21 +305,29 @@ posterior_mstte_fit.stanmstte <- function(object,
                                   draws       = NULL,
                                   seed        = NULL,
                                   ids = NULL,
+                                  id_var = NULL,
+                                  time_var = NULL,
                                   ...) {
 
   validate_stanmstte_object(object)
   if (!is.null(seed))
     set.seed(seed)
 
-  N = max(newdata$trans)
-
+  N = object$n_trans
   labs = object$transition_labels
   last_time <- maybe_broadcast(last_time, N)
   times <- maybe_broadcast(times, N)
   condition <- maybe_broadcast(condition, N)
 
-  newdata = lapply(seq_len(N), function(i)
-    newdata[newdata$trans == i, ] )
+
+  if(!is.null(newdata)){
+    if(!is.null(time_var))
+      newdata$time = newdata[[time_var]]
+    if(!is.null(id_var))
+      newdata$id = newdata[[id_var]]
+    newdata_l = lapply(seq_len(N), function(i)
+      newdata )
+  }
 
   dots <- list(...)
 
@@ -349,9 +339,12 @@ posterior_mstte_fit.stanmstte <- function(object,
   for(h in seq_len(N)){
 
     basehaz  <- object$basehaz[[h]]
-    newdata_h <- newdata[[h]]
+    newdata_h <- newdata_l[[h]]
     times_h <- times[[h]]
     last_time_h <- last_time[[h]]
+
+    newdata_h <- validate_newdata(newdata_h)
+    has_newdata <- not.null(newdata_h)
 
     if (is.null(newdata_h) && object$ndelayed[[h]])
       stop("Prediction data for 'posterior_survfit' cannot include delayed ",
@@ -360,14 +353,21 @@ posterior_mstte_fit.stanmstte <- function(object,
            "You must provide prediction data via the 'newdata' argument, and ",
            "indicate delayed entry via the 'last_time' argument.")
 
-    newdata_h <- validate_newdata(newdata_h)
-    has_newdata <- not.null(newdata_h)
 
     # Obtain a vector of unique subject ids
-    if (is.null(newdata_h)) {
-      id_list <- seq(nrow(get_model_data(object)[[h]] ))
+    # Obtain a vector of unique subject ids
+    if (is.null(id_var)) {
+      if (is.null(newdata_h)) {
+        id_list <- seq(nrow(object$model_data))
+      } else {
+        id_list <- seq(nrow(newdata_h))
+      }
     } else {
-      id_list <- seq(nrow(newdata_h))
+      if (is.null(newdata_h)) {
+        id_list <- unique(object$model_data[[id_var]])
+      } else {
+        id_list <- unique(newdata_h[[id_var]])
+      }
     }
 
     # Last known survival time for each individual
@@ -467,13 +467,13 @@ posterior_mstte_fit.stanmstte <- function(object,
 
     pars_h <- nlist(alpha, beta, beta_tde, aux, smooth, stanmat = stanmat_h)
 
-
     # Calculate survival probability at each increment of extrapolation sequence
-    surv <- lapply(time_seq, .pp_calculate_surv,
+    surv <- lapply(time_seq, .pp_execute_surv,
                    object      = object,
                    newdata     = newdata_h,
                    pars        = pars_h,
                    type        = type,
+                   id_var      = id_var,
                    standardise = standardise,
                    h = h)
 
@@ -492,13 +492,22 @@ posterior_mstte_fit.stanmstte <- function(object,
       surv <- lapply(surv, function(x) truncate(x / cond_surv, upper = 1))
     }
 
+    # test = lapply(surv, function(s)
+    #   apply(s, 2, mean))
+    #
+    # out[[h]] <- nlist(draws =  do.call(rbind, test),
+    #                   time_seq = ulist(time_seq),
+    #                   ids         = id_list
+    #              )
+
     # Summarise posterior draws to get median and CI
-    out[[h]] <- .pp_summarise_surv(surv        = surv,
+    out[[h]] <- .pp_summarise_surv2(surv        = surv,
                                    prob        = prob,
                                    standardise = standardise)
 
     # Add attributes
     out[[h]] <- structure(out[[h]],
+                          time_seq    = time_seq,
                           id_var      = attr(out[[h]], "id_var"),
                           time_var    = attr(out[[h]], "time_var"),
                           type        = type,
@@ -515,6 +524,8 @@ posterior_mstte_fit.stanmstte <- function(object,
   }
   structure(out,
             seed        = seed,
+            labels      = object$transition_labels,
+            n_trans     = N,
             class       = c("posterior_mstte_fit.stanmstte", "list" )
   )
 }
@@ -554,62 +565,106 @@ extrapolation_control <-
     return(control)
   }
 
-
 # Calculate the desired prediction (e.g. hazard, cumulative hazard, survival
 # probability) at the specified times
-.pp_calculate_surv <- function(times,
-                               object,
-                               newdata      = NULL,
-                               newdataLong  = NULL,
-                               newdataEvent = NULL,
-                               pars,
-                               type         = "surv",
-                               id_list      = NULL,
-                               standardise  = FALSE,
-                               h = h) {
+.pp_execute_surv <- function(times,
+                             object,
+                             newdata,
+                             pars,
+                             type = "surv",
+                             id_var = NULL,
+                             standardise = FALSE, ...) {
 
-  # Determine whether prediction type requires quadrature
-  needs_quadrature <- type %in% c("cumhaz",
-                                  "surv",
-                                  "cdf",
-                                  "logcumhaz",
-                                  "logsurv",
-                                  "logcdf")
-
-  # Evaluate hazard, cumulative hazard, survival or failure probability
-  ppdat <- .pp_data_mstte(object,
-                        newdata       = newdata,
-                        times         = times,
-                        at_quadpoints = needs_quadrature,
-                        k = h)
-
-  out <- .pp_predict_surv(object,
-                          data = ppdat,
-                          pars = pars,
-                          type = type,
-                          h = h)
+  # Construct data for prediction
+  dat  <- .pp_data_surv(object, newdata = newdata, times = times, type = type, ...)
+  # Evaluate hazard, cumulative hazard, or survival probability
+  surv <- .pp_eta_surv(object, data = dat, pars = pars, type = type, ...)
 
   # Transform if only one individual
-  out <- transpose_vector(out)
+  surv <- transpose_vector(surv)
 
   # Set survival probability == 1 if time == 0 (avoids possible NaN)
   if (type == "surv")
-    out <- replace_where(out, times == 0, replacement = 1, margin = 2L)
+    surv <- replace_where(surv, times == 0, replacement = 1, margin = 2L)
 
   # Standardisation: within each iteration, calculate mean across individuals
   if (standardise) {
-    out   <- row_means(out)
+    surv  <- row_means(surv)
     ids   <- "standardised_survprob"
     times <- unique(times)
   } else {
-    ids   <- if (is.null(id_list)) seq(ncol(out)) else id_list
+    ids   <- attr(surv, "ids")
+    times <- attr(surv, "times")
   }
-  dimnames(out) <- list(iterations = NULL, ids = ids)
+  dimnames(surv) <- list(iterations = NULL, ids = ids)
 
   # Add subject ids and prediction times as an attribute
-  structure(out, ids = ids, times = times)
+  structure(surv, ids = ids, times = times)
 }
 
+
+# Return survival probability or log-likelihood for event submodel
+#
+# @param object A stanjm object.
+# @param data Output from .pp_data_jm.
+# @param pars Output from extract_pars.
+# @param survprob A logical specifying whether to return the survival probability
+#   (TRUE) or the log likelihood for the event submodel (FALSE).
+# @param An S by Npat matrix, or a length Npat vector, depending on the inputs
+#   (where S is the size of the posterior sample and Npat is the number of
+#   individuals).
+.pp_eta_surv <- function(object, data, pars, type = "ll", ...) {
+
+  dots <- list(...)
+  h <- dots$h
+
+  # evaluate hazard; in which case quadrature is not relevant
+  if (type %in% c("haz", "ll")) {
+    args <- nlist(times     = data$times,
+                  basehaz   = object$basehaz[[h]],
+                  betas     = pars$beta,
+                  aux       = pars$bhcoef,
+                  intercept = pars$alpha,
+                  x         = data$x)
+    log_haz <- do.call(evaluate_log_haz, args)
+    if (type == "haz") {
+      return(structure(exp(log_haz),
+                       ids   = seq(ncol(log_haz)),
+                       times = data$times))
+    }
+  }
+
+  # otherwise evaluate cumulative hazard; may require quadrature
+  if (data$has_quadrature) {
+    args <- nlist(times     = data$qpts,
+                  basehaz   = object$basehaz,
+                  betas     = pars$beta,
+                  aux       = pars$bhcoef,
+                  intercept = pars$alpha,
+                  x         = data$x_qpts)
+    log_surv <- -quadrature_sum(exp(do.call(evaluate_log_haz, args)),
+                                qnodes = data$qnodes,
+                                qwts   = data$qwts)
+  } else {
+    args <- nlist(times     = data$times,
+                  basehaz   = object$basehaz[[h]],
+                  betas     = pars$beta,
+                  aux       = pars$aux,
+                  intercept = pars$alpha,
+                  x         = data$x)
+
+    log_surv <- do.call(evaluate_log_surv, args)
+  }
+
+  out <- switch(type,
+                cumhaz   = -log_surv,
+                logsurv  = log_surv,
+                surv     = exp(log_surv),
+                ll       = sweep_multiply(log_haz, data$status) + log_surv,
+                stop("Invalid input to the 'type'argument."))
+
+  structure(out, ids = seq(ncol(out)), times = data$times)
+}
 
 # Evaluate hazard, cumulative hazard, survival or failure probability
 #
@@ -668,7 +723,7 @@ extrapolation_control <-
 #   and collapse it across the MCMC iterations summarising it into median
 #   and CI. The result is a data frame with K times N rows, where K was
 #   the length of the original list.
-.pp_summarise_surv <- function(surv,
+.pp_summarise_surv2 <- function(surv,
                                prob        = NULL,
                                id_var      = NULL,
                                time_var    = NULL,
@@ -689,9 +744,38 @@ extrapolation_control <-
   if (is.null(prob)) {
     probs <- 0.5 # median only
     nms   <- c(id_var, time_var, "median")
+
+    m = as.vector( do.call(rbind, lapply(surv, function(s)
+      apply(s, 2, quantile, probs))) )
+    uid = unique(ids)
+    id = rep(uid, each = length(times))
+    time = rep(times, length(uid))
+    out <- data.frame(id = id,
+                      time = time,
+                      median = m
+                      )
+
   } else {
     probs <- c(0.5, (1 - prob)/2, (1 + prob)/2) # median and CI
     nms   <- c(id_var, time_var, "median", "ci_lb", "ci_ub")
+
+    m = as.vector( do.call(rbind, lapply(surv, function(s)
+      apply(s, 2, quantile, probs[1]))) )
+    ci_lb = as.vector ( do.call(rbind, lapply(surv, function(s)
+      apply(s, 2, quantile, probs[2]))) )
+    ci_ub = as.vector( do.call(rbind, lapply(surv, function(s)
+      apply(s, 2, quantile, probs[3]))) )
+    uid = unique(ids)
+    id = rep(uid, each = length(times))
+    time = rep(times, length(uid))
+
+    out <- data.frame(id = id,
+                      time = time,
+                      median = m,
+               ci_lb = ci_lb,
+               ci_ub = ci_ub
+               )
+
   }
 
   # Possibly overide default variable names for the returned data frame
@@ -700,12 +784,6 @@ extrapolation_control <-
   }
 
   # Calculate mean and CI at each prediction time
-  out <- data.frame(do.call("rbind", lapply(surv, col_quantiles_, probs)))
-  out <- mutate_(out, id_var = ids, time_var = times)
-  out <- row_sort(out, id_var, time_var)
-  out <- col_sort(out, id_var, time_var)
-  out <- set_rownames(out, NULL)
-  out <- set_colnames(out, nms)
 
   # Drop excess info if standardised predictions were calculated
   if (standardise) { out[[id_var]] <- NULL; id_var <- NULL }
@@ -749,14 +827,18 @@ print.survfit.stanjm <- function(x, digits = 4, ...) {
   invisible(x)
 }
 
-
-print.fit.stanidm <- function(x, labels) {
-  if(missing(labels)){
+#' Print method for stanmstte
+#' @method print posterior_mstte_fit.stanmstte
+#' @export
+print.posterior_mstte_fit.stanmstte <- function(x) {
+  labels = attr(x, "labels")
+  N      = attr(x, "n_trans")
+  if(is.null(labels)){
     labels <- handle_labels(x)
   }
 
-  cat("stan_idm predictions\n")
-  for(h in seq_along(x)){
+  cat("stan_mstte predictions\n")
+  for(h in seq_along(N)){
     cat("\n ----------------- \n")
     cat(" ", labels[h], "\n" )
     print.survfit.stansurv(x[[h]])
@@ -768,18 +850,20 @@ print.fit.stanidm <- function(x, labels) {
 #' @export
 as.data.frame.posterior_mstte_fit.stanmstte <- function(x, ...) {
   x <-
-    mapply(`[<-`, x, 'transition', value = seq_along(x), SIMPLIFY = FALSE)
+    mapply(`[<-`, x, 'trans', value = seq_along(x), SIMPLIFY = FALSE)
 
   do.call(rbind.data.frame, unclass(x), ...)
 }
 
 
 # -----------------  plot methods  --------------------------------------------
-
-plot.fit.stanidm <- function(x,
+#' Plot method for stanmstte
+#' @method plot posterior_mstte_fit.stanmstte
+#' @export
+plot.posterior_mstte_fit.stanmstte <- function(x,
                              ids    = NULL,
                              limits = c("ci", "none"),
-                             xlab   = NULL,
+                             xlab   = "time",
                              ylab   = NULL,
                              facet_scales = "free",
                              ci_geom_args = NULL,
@@ -788,16 +872,13 @@ plot.fit.stanidm <- function(x,
 
   limits <- match.arg (limits)
   ci     <- as.logical(limits == "ci")
-
-  if(is.null(xlab)) xlab <- lapply(seq_along(x), function(x) NULL)
-  if(is.null(ylab)) ylab <- lapply(seq_along(x), function(x) NULL)
-  if(is.null(ids)) ids <- lapply(seq_along(x), function(x) NULL)
-
-
-  plotlist <- lapply(seq_along(x), function(i){
+  N      <- attr(x, "n_trans")
+  xlab   <- maybe_broadcast(xlab, N)
+  ylab   <- maybe_broadcast(ylab, N)
+  ids    <- maybe_broadcast(ids, N)
+  plotlist <- lapply(seq_len(N), function(i){
 
     x_n <- x[[i]]
-
     type        <- attr(x[[i]], "type")
     standardise <- attr(x[[i]], "standardise")
     id_var      <- attr(x[[i]], "id_var")
@@ -818,13 +899,13 @@ plot.fit.stanidm <- function(x,
     x_n$time <- x_n[[time_var]]
 
     geom_defaults <- list(color = "black")
-    geom_mapp     <- list(mapping = aes_string(x = "time",
+    geom_mapp     <- list(mapping = ggplot2::aes_string(x = "time",
                                                y = "median"))
     geom_args     <- do.call("set_geom_args",
                              c(defaults = list(geom_defaults), list(...)))
 
     lim_defaults  <- list(alpha = 0.3)
-    lim_mapp      <- list(mapping = aes_string(x = "time",
+    lim_mapp      <- list(mapping = ggplot2::aes_string(x = "time",
                                                ymin = "ci_lb",
                                                ymax = "ci_ub"))
     lim_args      <- do.call("set_geom_args",
@@ -835,9 +916,9 @@ plot.fit.stanidm <- function(x,
             "the number of individuals by specifying the 'ids' argument.")
 
     graph_base <-
-      ggplot(x_n) +
-      theme_bw() +
-      coord_cartesian(ylim = get_survpred_ylim(type)) +
+      ggplot2::ggplot(x_n) +
+      ggplot2::theme_bw() +
+      ggplot2::coord_cartesian(ylim = get_survpred_ylim(type)) +
       do.call("geom_line", c(geom_mapp, geom_args))
 
     graph_facet <-
@@ -852,11 +933,13 @@ plot.fit.stanidm <- function(x,
 
     graph_labels <- labs(x = xlab[[i]], y = ylab[[i]])
 
+
     gg        <- graph_base + graph_facet + graph_limits + graph_labels
     class_gg  <- class(gg)
     class(gg) <- c("plot.survfit.stanjm", class_gg)
     gg
   })
+
   cowplot::plot_grid(
     plotlist = plotlist,
     axis = "rlbt",
@@ -1041,5 +1124,123 @@ handle_newdata <- function(object, newdata, call. = FALSE) {
     stop("A new dataframe has to be provided for each transition.", call. = call.)
 }
 
+handle_labels <- function(x){
+  paste0("Transition_", seq_along(x))
+}
+# Return data frames only including the specified subset of individuals
+#
+# @param data A data frame, or a list of data frames
+# @param ids A vector of ids indicating which individuals to keep
+# @param id_var Character string, the name of the ID variable
+# @return A data frame, or a list of data frames, depending on the input
+subset_ids <- function(data, ids, id_var) {
+
+  if (is.null(data))
+    return(NULL)
+
+  is_list <- is(data, "list")
+  if (!is_list)
+    data <- list(data) # convert to list
+
+  is_df <- sapply(data, inherits, "data.frame")
+  if (!all(is_df))
+    stop("'data' should be a data frame, or list of data frames.")
+
+  data <- lapply(data, function(x) {
+    if (!id_var %in% colnames(x)) STOP_no_var(id_var)
+    sel <- which(!ids %in% x[[id_var]])
+    if (length(sel))
+      stop("The following 'ids' do not appear in the data: ",
+           paste(ids[[sel]], collapse = ", "))
+    x[x[[id_var]] %in% ids, , drop = FALSE]
+  })
+
+  if (is_list) return(data) else return(data[[1]])
+}
+
+
+mc_sample <- function(object, ids, replic = 1000, trace = 1001 ){
+  if(missing(ids)){
+    ids <- unique(object[[1]][[attr(ps, "id_var")]])
+  }
+  out <- lapply(seq_along(ids), function(i){
+    ps <- as.data.frame(object)
+    ps_i <- ps[ps$id == i, ]
+
+    ps_i$Haz = ps_i$median
+    tv = unique(ps_i$time)
+    out <- mstate::mssample(Haz=ps_i,
+                     trans=tmat,
+                     clock = "reset",
+                     M=replic,
+                     output = "state",
+                     tvec = tv,
+                     do.trace=trace)
+
+    ps_i$Haz = ps_i$ci_lb
+    out_cl <- mstate::mssample(Haz=ps_i,
+                            trans=tmat,
+                            clock = "reset",
+                            M=replic,
+                            output = "state",
+                            tvec = tv,
+                            do.trace=trace)
+    colnames(out_cl)[-1] <- paste0(colnames(out_cl)[-1], "_ci_lb")
+
+    ps_i$Haz = ps_i$ci_ub
+    out_cu <- mstate::mssample(Haz=ps_i,
+                               trans=tmat,
+                               clock = "reset",
+                               M=replic,
+                               output = "state",
+                               tvec = tv,
+                               do.trace=trace)
+    colnames(out_cu)[-1] <- paste0(colnames(out_cu)[-1], "_ci_ub")
+
+    out <- dplyr::left_join(out, out_cl, by = "time")
+    out <- dplyr::left_join(out, out_cu, by = "time")
+
+  })
+
+  structure(out,  class  = c("mc_sample", "list"))
+}
+
+mc_sample.plot <- function(x, ids = NULL, type = "surv"){
+
+  if(is.null(ids))
+    ids <- seq_along(x)
+  x <- x[ids]
+out <- lapply(x,  function(p){
+  time <- p$time
+  p$time <- NULL
+  N <- sum(!grepl("\\_", colnames(p)))
+  out <- lapply(seq_len(N), function(var){
+    probs <- p[[var]]
+    cl = p[[var + N]]
+    cu = p[[var + 2*N]]
+
+    ggplot2::ggplot(data.frame(y = probs,
+                               x = time,
+                               c_l = cl,
+                               c_u = cu),
+                    ggplot2::aes(x , y)) +
+      ggplot2::geom_ribbon(aes(ymin = c_l, ymax = c_u), fill = "grey70")+
+      ggplot2::geom_line(linetype = "dashed") +
+      ggplot2::theme_bw() +
+      ggplot2::coord_cartesian(ylim = get_survpred_ylim(type))
+
+
+  })
+  cowplot::plot_grid(
+    plotlist = out,
+    axis = "rlbt",
+    label_size = 10)
+
+})
+cowplot::plot_grid(
+  plotlist = out,
+  axis = "rlbt",
+  label_size = 10)
+}
 
 

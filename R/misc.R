@@ -1651,7 +1651,16 @@ sample_stanmat <- function(object, draws = NULL, default_draws = NA) {
   }
   stanmat
 }
-
+# Sample rows from a two-dimensional object
+#
+# @param x The two-dimensional object (e.g. matrix, data frame, array).
+# @param size Integer specifying the number of rows to sample.
+# @param replace Should the rows be sampled with replacement?
+# @return A two-dimensional object with 'size' rows and 'ncol(x)' columns.
+sample_rows <- function(x, size, replace = FALSE) {
+  samp <- sample(nrow(x), size, replace)
+  x[samp, , drop = FALSE]
+}
 
 
 # Set arguments for sampling
@@ -1767,4 +1776,20 @@ validate_newdata <- function(x) {
   x <- as.data.frame(x)
   drop_redundant_dims(x)
 }
-
+set_geom_args <- function(defaults, ...) {
+  dots <- list(...)
+  if (!length(dots))
+    return(defaults)
+  dot_names <- names(dots)
+  def_names <- names(defaults)
+  for (j in seq_along(def_names)) {
+    if (def_names[j] %in% dot_names)
+      defaults[[j]] <- dots[[def_names[j]]]
+  }
+  extras <- setdiff(dot_names, def_names)
+  if (length(extras)) {
+    for (j in seq_along(extras))
+      defaults[[extras[j]]] <- dots[[extras[j]]]
+  }
+  return(defaults)
+}
